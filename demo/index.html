@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>統編查詢 展示</title>
+<script src="/src/taxid.js"></script>
+<style>
+  :root {
+    --bg: #f9fbfd; --sheet: #fff; --grid: #e1e3e6; --head: #f8f9fa; --head-ink: #5f6368;
+    --ink: #202124; --muted: #5f6368; --accent: #1a73e8; --sel: #e8f0fe;
+    --ok: #188038; --bad: #c5221f; --warn: #b06000; --chrome: #fff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.4 Arial, "Noto Sans TC", sans-serif; color: var(--ink); background: var(--bg); }
+  .top { background: var(--chrome); padding: 10px 16px 6px; display: flex; align-items: center; gap: 12px; }
+  .logo { width: 28px; height: 36px; border-radius: 3px; background: #0f9d58; position: relative; flex: none; }
+  .logo::after { content: ""; position: absolute; inset: 12px 6px 8px; border: 2px solid #fff; border-radius: 1px;
+    background: linear-gradient(#fff, #fff) 50% 0/2px 100% no-repeat, linear-gradient(#fff, #fff) 0 50%/100% 2px no-repeat; }
+  .title { font-size: 18px; }
+  .menu { color: var(--muted); font-size: 14px; display: flex; gap: 14px; margin-top: 2px; }
+  .menu b { color: var(--ink); font-weight: normal; background: var(--sel); border-radius: 4px; padding: 0 6px; }
+  .fx { display: flex; align-items: center; border-top: 1px solid var(--grid); border-bottom: 1px solid var(--grid); background: var(--chrome); }
+  .fx .ref { width: 80px; padding: 6px 10px; border-right: 1px solid var(--grid); color: var(--muted); }
+  .fx .f { padding: 6px 10px; color: var(--muted); font-style: italic; border-right: 1px solid var(--grid); }
+  .fx input { flex: 1; border: 0; padding: 6px 10px; font: inherit; outline: none; background: transparent; color: var(--ink); }
+  .wrap { overflow: auto; height: calc(100vh - 150px); background: var(--sheet); }
+  table { border-collapse: collapse; table-layout: fixed; }
+  th, td { border: 1px solid var(--grid); height: 24px; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  th { background: var(--head); color: var(--head-ink); font-weight: normal; position: sticky; top: 0; z-index: 1; }
+  th.row { position: sticky; left: 0; width: 46px; z-index: 2; }
+  tr:first-child th.row { z-index: 3; }
+  td.hdr { font-weight: bold; background: #f1f3f4; }
+  td { cursor: cell; }
+  td.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+  td.inp { background: #fffde7; }
+  td.num { text-align: right; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); } .muted { color: var(--muted); }
+  td input { width: 100%; border: 0; outline: none; font: inherit; background: transparent; padding: 0; }
+  .tabs { position: fixed; bottom: 0; left: 0; right: 0; height: 36px; background: var(--head); border-top: 1px solid var(--grid);
+    display: flex; align-items: center; gap: 4px; padding: 0 12px; font-size: 13px; }
+  .tab { padding: 6px 14px; color: var(--muted); }
+  .tab.on { background: var(--sheet); color: var(--accent); border-bottom: 2px solid var(--accent); }
+  .note { margin-left: auto; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="logo" aria-hidden="true"></div>
+  <div>
+    <div class="title">廠商名單（展示）</div>
+    <div class="menu"><span>檔案</span><span>編輯</span><span>查看</span><span>插入</span><span>格式</span><span>資料</span><b>擴充功能</b></div>
+  </div>
+</div>
+<div class="fx"><div class="ref" id="ref">A2</div><div class="f">fx</div><input id="bar" readonly></div>
+<div class="wrap"><table id="t"></table></div>
+<div class="tabs"><span class="tab on">工作表1</span><span class="note">黃色格子可以輸入統編；點其他格子看公式</span></div>
+
+<script>
+const COLS = ['A','B','C','D','E','F','G','H','I','J'];
+const WIDTHS = [110, 110, 260, 300, 130, 100, 110, 70, 100, 280];
+const HEAD = ['統編', '統編檢查', '名稱', '地址', '資本額', '設立日期', '組織別', '開發票', '總機構統編', '行業'];
+const NOT_FOUND = '查無（可能不是公司或已不營業）';
+const START = ['22099131', '86517510', '23638777', '22099132', '38965019', '２２０９９１３１', 'abc', '', '', '', '', ''];
+const shardCache = {};
+
+const t = document.getElementById('t');
+const bar = document.getElementById('bar'), ref = document.getElementById('ref');
+let selected = null;
+
+function build() {
+  t.style.width = (46 + WIDTHS.reduce((a, b) => a + b, 0)) + 'px';
+  let h = '<colgroup><col style="width:46px">' + WIDTHS.map(w => `<col style="width:${w}px">`).join('') + '</colgroup>';
+  h += '<tr><th class="row"></th>' + COLS.map(c => `<th>${c}</th>`).join('') + '</tr>';
+  h += '<tr><th class="row">1</th>' + HEAD.map(x => `<td class="hdr">${x}</td>`).join('') + '</tr>';
+  START.forEach((v, i) => {
+    const r = i + 2;
+    h += `<tr data-r="${r}"><th class="row">${r}</th><td class="inp" data-c="A"><input value="${v}" aria-label="A${r} 統編"></td>`
+      + COLS.slice(1).map(c => `<td data-c="${c}"></td>`).join('') + '</tr>';
+  });
+  t.innerHTML = h;
+  t.querySelectorAll('tr[data-r]').forEach(tr => {
+    tr.querySelector('input').addEventListener('input', () => fill(tr));
+    fill(tr);
+  });
+}
+
+function formulaFor(c, r) {
+  if (c === 'A') return t.querySelector(`tr[data-r="${r}"] input`).value;
+  if (c === 'B') return `=統編檢查(A${r})`;
+  if (c === 'C') return `=統編查詢(A${r}, "全部")`;
+  return `（由 C${r} 的「全部」展開）`;
+}
+
+t.addEventListener('click', e => {
+  const td = e.target.closest('td[data-c]'); if (!td) return;
+  if (selected) selected.classList.remove('sel');
+  selected = td; td.classList.add('sel');
+  const r = td.parentElement.dataset.r;
+  ref.textContent = td.dataset.c + r;
+  bar.value = formulaFor(td.dataset.c, r);
+});
+
+async function shard(prefix) {
+  if (!shardCache[prefix]) shardCache[prefix] = fetch(`/v1/${prefix}.json`).then(r => r.ok ? r.json() : {});
+  return shardCache[prefix];
+}
+
+async function fill(tr) {
+  const v = tr.querySelector('input').value;
+  const cells = [...tr.querySelectorAll('td[data-c]')].slice(1);
+  const set = (vals, cls = '') => cells.forEach((td, i) => {
+    const x = vals[i] ?? '';
+    td.textContent = typeof x === 'number' ? x.toLocaleString('zh-TW') : x;
+    td.className = (i === 0 ? cls : (i === 1 ? cls2 : '')) + (typeof x === 'number' ? ' num' : '');
+    if (selected === td) td.classList.add('sel');
+  });
+  let cls2 = '';
+  const check = checkTaxId(v);
+  const checkCls = check === '正確' ? 'ok' : check ? 'bad' : '';
+  if (!v) return set([]);
+  const id = normalizeTaxId(v);
+  if (!id || !isValidTaxIdChecksum(id)) { cls2 = 'bad'; return set([check, '統編格式錯誤'], checkCls); }
+  cls2 = 'muted';
+  set([check, '讀取中…'], checkCls);
+  const rec = (await shard(id.slice(0, 4)))[id];
+  if (tr.querySelector('input').value !== v) return;
+  if (!rec) { cls2 = 'warn'; return set([check, NOT_FOUND], checkCls); }
+  cls2 = '';
+  set([check, ...rec.map(x => x === true ? '是' : x === false ? '否' : x ?? '')], checkCls);
+}
+
+build();
+</script>
+</body>
+</html>
