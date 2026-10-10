@@ -33,14 +33,19 @@
   .cand b { display: block; }
   .cand span { color: var(--muted); font-size: 12px; }
   .badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--soft); color: var(--muted); margin-left: 4px; }
+  .seg { display: flex; flex-direction: column; gap: 4px; }
+  .cities { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 6px; font-size: 12px; }
+  button.link { border: 0; background: none; color: var(--accent); font: inherit; font-size: 12px; font-weight: normal; padding: 0 2px; cursor: pointer; }
+  input[type=search] { box-sizing: border-box; }
   hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0 16px; }
   .foot { margin: 8px 16px 16px; color: var(--muted); font-size: 11px; }
 </style>
 </head>
 <body>
   <div class="tabs">
-    <button class="tab on" data-pane="byName">用名稱找統編</button>
-    <button class="tab" data-pane="byId">用統編查公司</button>
+    <button class="tab on" data-pane="byName">名稱找統編</button>
+    <button class="tab" data-pane="byId">統編查公司</button>
+    <button class="tab" data-pane="newCo">新公司</button>
   </div>
 
   <div class="pane on" id="byName">
@@ -73,6 +78,45 @@
     <button class="main" id="go" disabled>開始填入</button>
     <div class="hint">結果會插在統編那一欄的右邊，不會覆蓋原本的資料。</div>
     <div class="result" id="result"></div>
+  </div>
+
+  <div class="pane" id="newCo">
+    <h2>找最近新設立的公司</h2>
+    <div class="seg" role="radiogroup" aria-label="依據">
+      <label><input type="radio" name="basis" value="setup" checked> 依設立日期</label>
+      <label><input type="radio" name="basis" value="seen"> 每天新進資料</label>
+    </div>
+    <div class="hint" id="basisHint">財政部的資料會晚 2～3 週才出現，所以最近幾天的公司會比較少，之後陸續補進來。</div>
+
+    <h2>期間</h2>
+    <select id="days" aria-label="期間">
+      <option value="7">最近 7 天</option>
+      <option value="30" selected>最近 30 天</option>
+      <option value="90">最近 90 天</option>
+      <option value="180">最近 180 天</option>
+    </select>
+
+    <h2>縣市 <button class="link" id="cityAll" type="button">全選</button> <button class="link" id="cityNone" type="button">清除</button></h2>
+    <div class="cities" id="cities"></div>
+    <div class="hint">都不勾＝全台。</div>
+
+    <h2>行業或名稱</h2>
+    <input type="search" id="kw" placeholder="例如：餐飲 咖啡 物流" aria-label="行業或名稱關鍵字">
+    <div class="hint">多個字用空白分開，符合任一個就列出。不填＝全部行業。</div>
+
+    <h2>資本額</h2>
+    <select id="minCap" aria-label="資本額至少">
+      <option value="0">不限</option>
+      <option value="1000000">100 萬以上</option>
+      <option value="5000000">500 萬以上</option>
+      <option value="10000000">1,000 萬以上</option>
+      <option value="100000000">1 億以上</option>
+    </select>
+    <label class="check"><input type="checkbox" id="noBranch" checked> 不含分公司</label>
+
+    <button class="main" id="newGo">產生名單</button>
+    <div class="hint">會開一張新的工作表，依設立日期由新到舊排好，最右邊留一欄「備註」給你寫追蹤狀況。</div>
+    <div class="result" id="newResult"></div>
   </div>
 
   <div class="foot">資料來源：財政部全國營業(稅籍)登記資料集，每日更新，只含公司。</div>
@@ -162,6 +206,37 @@
       show('result', lines.join('<br>'));
     }, function (e) { btn.done('開始填入'); show('result', '<span class="err">' + esc(msg(e)) + '</span>'); })
       .fillCompanyData({ column: Number($('col').value), fields: fields, check: $('check').checked });
+  });
+
+  // 新公司
+  var CITIES = ['臺北市', '新北市', '桃園市', '臺中市', '臺南市', '高雄市', '基隆市', '新竹市', '新竹縣', '苗栗縣', '彰化縣',
+    '南投縣', '雲林縣', '嘉義市', '嘉義縣', '屏東縣', '宜蘭縣', '花蓮縣', '臺東縣', '澎湖縣', '金門縣', '連江縣'];
+  $('cities').innerHTML = CITIES.map(function (c) { return '<label><input type="checkbox" value="' + c + '"> ' + c + '</label>'; }).join('');
+  function setCities(on) { document.querySelectorAll('#cities input').forEach(function (el) { el.checked = on; }); }
+  $('cityAll').addEventListener('click', function () { setCities(true); });
+  $('cityNone').addEventListener('click', function () { setCities(false); });
+  var BASIS_HINT = {
+    setup: '財政部的資料會晚 2～3 週才出現，所以最近幾天的公司會比較少，之後陸續補進來。',
+    seen: '每天新出現在財政部資料裡的公司，不管設立日期。適合每天或每週追新名單，不會漏也不會重複。',
+  };
+  document.querySelectorAll('input[name=basis]').forEach(function (el) {
+    el.addEventListener('change', function () { $('basisHint').textContent = BASIS_HINT[el.value]; });
+  });
+  $('newGo').addEventListener('click', function () {
+    var cities = Array.prototype.map.call(document.querySelectorAll('#cities input:checked'), function (el) { return el.value; });
+    var basis = document.querySelector('input[name=basis]:checked').value;
+    var btn = busy($('newGo'), '產生中…');
+    run(function (s) {
+      btn.done('產生名單');
+      var lines = ['<span class="ok">完成</span>，已開新工作表「' + esc(s.sheetName) + '」', '共 ' + s.total + ' 家' + (s.truncated ? '，只列前 ' + s.count + ' 家，可以把條件設窄一點' : '')];
+      if (!s.total && s.basis === 'seen') lines.push('「每天新進資料」從 ' + s.trackingSince + ' 開始記錄，之後每天會累積。');
+      else if (!s.total) lines.push('沒有符合的公司，試試放寬期間、縣市或關鍵字。');
+      show('newResult', lines.join('<br>'));
+    }, function (e) { btn.done('產生名單'); show('newResult', '<span class="err">' + esc(msg(e)) + '</span>'); })
+      .makeNewCompanySheet({
+        basis: basis, days: Number($('days').value), cities: cities, keyword: $('kw').value,
+        minCapital: Number($('minCap').value), excludeBranch: $('noBranch').checked,
+      });
   });
 
   function done(s) {

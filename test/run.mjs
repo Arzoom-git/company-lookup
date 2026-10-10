@@ -40,10 +40,10 @@ test('CSV 解析與民國日期', () => {
 });
 
 const out = fs.mkdtempSync(path.join(os.tmpdir(), 'shards-'));
-const built = await buildShards(path.join(root, 'test/fixture.csv'), out, { minCompanies: 1 });
+const built = await buildShards(path.join(root, 'test/fixture.csv'), out, { minCompanies: 1, today: '2026-10-10' });
 
 test('切檔：只收公司，獨資不收', () => {
-  assert.equal(built.companies, 8);
+  assert.equal(built.companies, 12);
   assert.equal(built.dataDate, '10-OCT-26');
   const s = JSON.parse(fs.readFileSync(path.join(out, 'v1/2209.json'), 'utf8'));
   assert.deepEqual(s['22099131'].slice(0, 6), ['台灣積體電路製造股份有限公司', '新竹市東區科園里科學園區力行六路8號', 259323700670, '1987-03-21', '股份有限公司', true]);
@@ -68,10 +68,15 @@ function fakeSheet(grid) {
     setBackgrounds(v) { v.forEach((r, i) => r.forEach((x, j) => { bg[`${row + i},${col + j}`] = x; })); return this; },
     setBackground() { return this; },
     setFontWeight() { return this; },
+    setFontColor() { return this; },
+    setFontStyle() { return this; },
     setNumberFormat() { return this; },
+    applyRowBanding() { return this; },
   });
   const sheet = {
-    getName: () => '工作表1', getLastRow: () => grid.length, getLastColumn: width, getRange: range,
+    name: '工作表1',
+    getName() { return this.name; }, getLastRow: () => grid.length, getLastColumn: width, getRange: range,
+    getColumnWidth: () => 100, setColumnWidth: () => {},
     insertRowBefore: (r) => { grid.splice(r - 1, 0, []); },
     insertColumnsAfter: (c, n) => { grid.forEach((row) => { if (row.length > c) row.splice(c, 0, ...Array(n).fill('')); }); },
     autoResizeColumns: () => {},
@@ -91,8 +96,14 @@ function loadAddon(grid = []) {
     const ok = fs.existsSync(f);
     return { getResponseCode: () => (ok ? 200 : 404), getContentText: () => (ok ? fs.readFileSync(f, 'utf8') : '') };
   };
+  const sheets = [fake];
+  const ss = {
+    insertSheet: (name) => { const s = fakeSheet([]); s.sheet.name = name; sheets.push(s); return s.sheet; },
+    getSheetByName: (name) => sheets.find((s) => s.sheet.getName() === name)?.sheet ?? null,
+    setActiveSheet: () => {},
+  };
   const ctx = {
-    SpreadsheetApp: { getActiveSheet: () => fake.sheet },
+    SpreadsheetApp: { getActiveSheet: () => fake.sheet, getActiveSpreadsheet: () => ss, BandingTheme: { LIGHT_GREY: 'LIGHT_GREY' } },
     UrlFetchApp: {
       fetch: (url) => serve(url),
       fetchAll: (reqs) => reqs.map(({ url }) => serve(url)),
@@ -107,8 +118,8 @@ function loadAddon(grid = []) {
     },
   };
   vm.createContext(ctx);
-  for (const f of ['src/taxid.js', 'src/names.js', 'addon/Lookup.js', 'addon/NameSearch.js', 'addon/Panel.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
-  return { ctx, fetched, fake };
+  for (const f of ['src/taxid.js', 'src/names.js', 'addon/Lookup.js', 'addon/NameSearch.js', 'addon/NewCompanies.js', 'addon/Panel.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+  return { ctx, fetched, fake, sheets };
 }
 
 test('面板：猜統編欄、結果插在統編欄右邊、查無與格式錯誤上色', () => {
@@ -283,4 +294,50 @@ test('面板：標題叫「廠商統編」的統編欄，不會被當成名稱�
   const info = ctx.getSheetInfo();
   assert.equal(info.guess, 1);
   assert.equal(info.nameGuess, null);
+});
+
+test('新公司清單：近半年、第一次建清單時首次出現是空的', async () => {
+  const recent = JSON.parse(fs.readFileSync(path.join(out, 'v1/new/recent.json'), 'utf8'));
+  assert.equal(recent.today, '2026-10-10');
+  assert.equal(recent.trackingSince, '2026-10-10');
+  assert.deepEqual(recent.rows.map((r) => r[0]), ['60000009', '60000004', '60000010']); // 新到舊，老公司不收
+  assert.deepEqual(recent.rows[1], ['60000004', '晨曦咖啡有限公司', '臺北市大安區某路6號', 500000, '2026-09-30', '咖啡館', 0, null]);
+});
+
+test('新公司清單：接續前一天的清單，新冒出來的記今天', async () => {
+  const { buildRecent } = await import('../scripts/build-shards.mjs');
+  const shards = new Map([['6000', {
+    60000004: ['晨曦咖啡有限公司', 'x', 1, '2026-09-30', '有限公司', true, null, '咖啡館'],
+    60000010: ['鼎峰物流股份有限公司', 'y', 2, '2026-08-01', '股份有限公司', true, null, '倉儲'],
+  }]]);
+  const prev = { trackingSince: '2026-09-01', rows: [['60000004', '', '', 0, '', '', 0, '2026-10-01']] };
+  const r = buildRecent(shards, '2026-10-11', prev);
+  assert.equal(r.trackingSince, '2026-09-01');
+  assert.deepEqual(Object.fromEntries(r.rows.map((x) => [x[0], x[7]])), { 60000004: '2026-10-01', 60000010: '2026-10-11' });
+});
+
+test('新公司名單：縣市（台＝臺）、關鍵字、資本額、期間、分公司', () => {
+  const { ctx } = loadAddon();
+  const recent = JSON.parse(fs.readFileSync(path.join(out, 'v1/new/recent.json'), 'utf8'));
+  const ids = (o) => Array.from(ctx.filterNewCompanies_(recent, o).rows, (x) => x.row[2]);
+  assert.deepEqual(ids({ days: 180 }), ['60000004', '60000010']); // 預設不含分公司
+  assert.deepEqual(ids({ days: 180, excludeBranch: false }), ['60000009', '60000004', '60000010']);
+  assert.deepEqual(ids({ days: 30 }), ['60000004']);
+  assert.deepEqual(ids({ days: 180, cities: ['臺中市'] }), ['60000010']);
+  assert.deepEqual(ids({ days: 180, keyword: '倉儲 冷凍' }), ['60000010']);
+  assert.deepEqual(ids({ days: 180, keyword: '咖啡' }), ['60000004']);
+  assert.deepEqual(ids({ days: 180, minCapital: 10000000 }), ['60000010']);
+  assert.deepEqual(ids({ days: 180, basis: 'seen' }), []); // 第一天還沒有「新進」紀錄
+});
+
+test('新公司名單：開新工作表，第 1 列說明條件、第 2 列標題、留備註欄', () => {
+  const { ctx, sheets } = loadAddon();
+  const s = ctx.makeNewCompanySheet({ days: 90, cities: ['臺北市'], keyword: '咖啡', excludeBranch: true });
+  assert.equal(s.sheetName, '新公司 10/10');
+  assert.equal(s.total, 1);
+  const g = sheets.at(-1).grid;
+  assert.equal(g[0][0], '臺北市｜最近 90 天設立｜行業或名稱含：咖啡｜不含分公司｜共 1 家（資料日期 2026-10-10）');
+  assert.deepEqual(g[1], ['設立日期', '公司名稱', '統編', '縣市', '地址', '資本額', '行業', '備註']);
+  assert.deepEqual(g[2], ['2026-09-30', '晨曦咖啡有限公司', '60000004', '臺北市', '臺北市大安區某路6號', 500000, '咖啡館', '']);
+  assert.equal(ctx.makeNewCompanySheet({ days: 90 }).sheetName, '新公司 10/10 (2)'); // 同一天再產一次不會撞名
 });

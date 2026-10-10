@@ -16,14 +16,15 @@ http.createServer((req, res) => {
     // 側邊面板預覽：寬度跟試算表的側邊欄差不多，前面塞假的 google.script.run
     const html = fs.readFileSync(path.join(root, 'addon/Sidebar.html'), 'utf8').replace('<head>',
       '<head><style>html{background:#e8eaed}body{width:300px;min-height:100vh;margin:0 auto;background:#fff;box-shadow:0 0 0 1px #dadce0}</style>'
-      + '<script src="/src/names.js"></script><script src="/demo/panel-stub.js"></script>');
+      + '<script src="/src/names.js"></script><script>var DATA_BASE_URL = "/v1/";</script>'
+      + '<script src="/addon/NewCompanies.js"></script><script src="/demo/panel-stub.js"></script>');
     res.writeHead(200, { 'Content-Type': types['.html'] });
     return res.end(html);
   }
   let file;
   if (url === '/') file = path.join(root, 'demo/index.html');
   else if (url === '/snapshot.json') file = path.join(root, 'data/snapshot.json');
-  else if (url.startsWith('/demo/')) file = path.join(root, url);
+  else if (url.startsWith('/demo/') || url.startsWith('/addon/')) file = path.join(root, url);
   else if (url.startsWith('/src/')) file = path.join(root, url);
   else if (url.startsWith('/v1/')) file = path.join(root, 'data/out', url);
   const safe = file && path.resolve(file).startsWith(root) && fs.existsSync(file) && fs.statSync(file).isFile();

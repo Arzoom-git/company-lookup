@@ -22,19 +22,23 @@
 <script>
   // 跟 Panel.js 一樣：新增的結果欄標題是淡藍底粗體、凍結第 1 列、資本額千分位、統編是文字
   fetch('/snapshot.json').then(r => r.json()).then(list => {
-    document.getElementById('out').innerHTML = list.map(({ title, grid, bg }) => {
+    document.getElementById('out').innerHTML = list.map(({ title, grid, bg, headerRow = 0, banding }) => {
       const width = Math.max(...grid.map(r => r.length));
-      const capCol = grid[0].indexOf('資本額');
-      const original = new Set(grid[0].map((h, i) => (bg[`1,${i + 1}`] === undefined && !['統編', '正式名稱', '比對結果', '其他可能', '統編檢查', '名稱', '地址', '資本額', '組織別'].includes(h)) ? i : -1));
+      const hr = headerRow;
+      const capCol = grid[hr].indexOf('資本額');
+      const original = new Set(grid[hr].map((h, i) => (bg[`${hr + 1},${i + 1}`] === undefined && !banding && !['統編', '正式名稱', '比對結果', '其他可能', '統編檢查', '名稱', '地址', '資本額', '組織別'].includes(h)) ? i : -1));
       let h = '<tr><th></th>' + Array.from({ length: width }, (_, i) => `<th>${String.fromCharCode(65 + i)}</th>`).join('') + '</tr>';
       grid.forEach((row, r) => {
-        h += `<tr class="${r === 0 ? 'frozen' : ''}"><th>${r + 1}</th>`;
+        h += `<tr class="${r === hr ? 'frozen' : ''}"><th>${r + 1}</th>`;
+        if (r < hr) { h += `<td colspan="${width}" style="color:#5f6368;font-style:italic">${String(row[0] ?? '')}</td></tr>`; return; }
         for (let c = 0; c < width; c++) {
           let v = row[c] ?? '';
-          const color = r === 0 ? (original.has(c) ? '' : 'var(--hdr)') : (bg[`${r + 1},${c + 1}`] || '');
+          const band = banding && r > hr && (r - hr) % 2 === 0 ? '#f3f3f3' : '';
+          const color = r === hr ? (original.has(c) ? '' : 'var(--hdr)') : (bg[`${r + 1},${c + 1}`] || band);
           const isNum = typeof v === 'number';
           if (c === capCol && isNum) v = v.toLocaleString('en-US');
-          h += `<td class="${isNum ? 'num' : ''}" style="${color ? `background:${color};` : ''}${r === 0 && !original.has(c) ? 'font-weight:bold;' : ''}">${String(v).replace(/</g, '&lt;')}</td>`;
+          const cap = banding && (grid[hr][c] === '地址' || grid[hr][c] === '行業') ? 'max-width:320px;overflow:hidden;text-overflow:clip;' : '';
+          h += `<td class="${isNum ? 'num' : ''}" style="${cap}${color ? `background:${color};` : ''}${r === hr && !original.has(c) ? 'font-weight:bold;' : ''}${banding && grid[hr][c] === '備註' ? 'min-width:150px;' : ''}">${String(v).replace(/</g, '&lt;')}</td>`;
         }
         h += '</tr>';
       });

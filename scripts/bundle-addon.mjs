@@ -20,6 +20,8 @@ const out = [
   '',
   read('addon/NameSearch.js').trim(),
   '',
+  read('addon/NewCompanies.js').trim(),
+  '',
   read('addon/Panel.js').trim(),
   '',
   '// 側邊面板的畫面（原檔 addon/Sidebar.html）',

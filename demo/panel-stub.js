@@ -22,6 +22,13 @@
     writeToActiveCell: function () { return 'B2'; },
     fillCompanyIds: function () { return { confident: 41, check: 6, notFound: 3, blank: 0, firstColumn: 'D', lastColumn: 'G' }; },
     fillCompanyData: function () { return { found: 47, notFound: 2, invalid: 1, blank: 0, firstColumn: 'D', lastColumn: 'G' }; },
+    // 用真的 recent.json 與 addon/NewCompanies.js 的篩選，只是不真的開工作表
+    makeNewCompanySheet: async function (o) {
+      var recent = await fetch('/v1/new/recent.json').then(function (r) { return r.json(); });
+      var res = filterNewCompanies_(recent, o);
+      console.log('[stub] 第1列：' + describeNewCompanyFilter_(o, res));
+      return { sheetName: '新公司 ' + recent.today.slice(5).replace('-', '/'), count: res.rows.length, total: res.total, truncated: res.truncated, basis: res.basis, trackingSince: res.trackingSince, today: res.today };
+    },
   };
   function runner(ok, fail) {
     var r = {
