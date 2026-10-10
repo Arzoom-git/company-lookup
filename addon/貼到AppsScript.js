@@ -97,7 +97,8 @@ var COMMON_CHARS_ = '公司有限股份業';
 function isCommonChar_(ch) { return COMMON_CHARS_.indexOf(ch) >= 0; }
 
 // 排名：分數越小越前面。完全同名 > 名稱包含 > 字依序出現；本公司 > 分公司；資本額大、名稱短的優先
-var MATCH_EXACT = 0, MATCH_CONTAINS = 40, MATCH_IN_ORDER = 100;
+// 權重是用 40 個常見簡稱（台積電、中鋼、富邦金控…）實測調出來的：第一名對 38/40，標「確定」的全對（2026-10-10）
+var MATCH_EXACT = 0, MATCH_CONTAINS = 30, MATCH_IN_ORDER = 60, CAPITAL_WEIGHT = 30;
 
 function matchTier(query, rec) {
   var full = normalizeName(rec[1]);
@@ -107,7 +108,7 @@ function matchTier(query, rec) {
 
 function scoreCandidate(query, rec) {
   return matchTier(query, rec) + (rec[3] ? 200 : 0)
-    - 20 * Math.log(Number(rec[2] || 0) + 1) / Math.LN10 + nameCore(normalizeName(rec[1])).length;
+    - CAPITAL_WEIGHT * Math.log(Number(rec[2] || 0) + 1) / Math.LN10 + nameCore(normalizeName(rec[1])).length;
 }
 
 // 查詢字串整理成比對用的樣子（去掉「股份有限公司」等字尾）
@@ -284,7 +285,7 @@ function padRow_(head) {
 
 var NAME_DATA_URL = DATA_BASE_URL + 'n/';
 var NAME_FETCH_BATCH = 8; // 單一字的檔最大約 4 MB，一次不要抓太多
-var NAME_TOO_VAGUE = '名稱太籠統（只有「公司」「有限」這類字）';
+var NAME_TOO_VAGUE = '名稱太籠統';
 var NAME_NOT_FOUND = '查無';
 var NAME_RESULT_FIELDS = ['統編', '名稱', '比對結果'];
 
@@ -326,10 +327,10 @@ function COMPANY_ID_BY_NAME(name, field) {
   return 名稱找統編(name, field);
 }
 
-// 一個查詢結果 → [統編, 正式名稱, 比對結果]
+// 一個查詢結果 → [統編, 正式名稱, 比對結果]。找不到時原因只寫在「比對結果」，不重複
 function describeNameResult_(res) {
-  if (!res || res.status === 'notFound') return ['', NAME_NOT_FOUND, NAME_NOT_FOUND];
-  if (res.status === 'vague') return ['', NAME_TOO_VAGUE, NAME_TOO_VAGUE];
+  if (!res || res.status === 'notFound') return ['', '', NAME_NOT_FOUND];
+  if (res.status === 'vague') return ['', '', NAME_TOO_VAGUE];
   var top = res.candidates[0];
   return [top.id, top.name, res.confident ? '確定' : '請確認'];
 }
@@ -449,7 +450,9 @@ function getSheetInfo() {
       else if (typeof v === 'string' && /[一-鿿]{2,}/.test(v)) nameHits += /公司|企業|行$|社$/.test(v) ? 2 : 1;
     }
     var head = hasHeader ? String(sample[0][c] || '').trim() : '';
-    if (/名稱|公司|廠商|客戶|企業/.test(head)) nameHits += 10;
+    // 標題加分只給內容真的有中文名稱的欄（「廠商統編」那種統編欄不算）
+    if (nameHits > hits && /名稱|公司|廠商|客戶|企業/.test(head)) nameHits += 10;
+    if (hits >= nameHits) nameHits = 0;
     var empty = sample.every(function (row, r) { return (hasHeader && r === 0) || row[c] === '' || row[c] === null; });
     if (empty) continue; // 空的欄不列出來
     columns.push({ index: c + 1, letter: columnLetter_(c + 1), header: head });
@@ -497,8 +500,9 @@ function fillCompanyData(options) {
       stats.blank++;
       fields.forEach(function () { row.push(''); });
     } else if (!ids[i]) {
+      // 有「統編檢查」欄時原因已經寫在那裡，資料欄留白就好
       stats.invalid++; color = FILL_COLORS.invalid;
-      fields.forEach(function (f, k) { row.push(k === 0 ? '統編格式錯誤' : ''); });
+      fields.forEach(function (f, k) { row.push(k === 0 && !options.check ? '統編有誤' : ''); });
     } else if (!found[ids[i]]) {
       stats.notFound++; color = FILL_COLORS.notFound;
       fields.forEach(function (f, k) { row.push(k === 0 ? NOT_FOUND : ''); });
@@ -521,7 +525,7 @@ function fillCompanyIds(options) {
   if (!col) throw new Error('請選公司名稱在哪一欄');
   var src = readColumn_(sheet, col, options.hasHeader);
   if (columnKind_(src.cells) === 'ids') throw new Error('這一欄是統編，請改用上面的「用統編查公司」');
-  var results = searchNames_(src.cells.filter(function (v) { return v !== '' && v !== null; }).map(String), 3);
+  var results = searchNames_(src.cells.filter(function (v) { return v !== '' && v !== null; }).map(String), 6);
 
   var headers = ['統編', '正式名稱', '比對結果', '其他可能'];
   var stats = { confident: 0, check: 0, notFound: 0, blank: 0 };
@@ -530,7 +534,11 @@ function fillCompanyIds(options) {
     if (v === '' || v === null) { stats.blank++; colors.push([null, null, null, null]); return ['', '', '', '']; }
     var res = results[String(v)];
     var d = describeNameResult_(res);
-    var others = res && res.candidates ? res.candidates.slice(1).map(function (c) { return c.name + ' ' + c.id; }).join('；') : '';
+    // 「其他可能」只給需要確認的列，而且不列分公司（同一家公司的分公司對選擇沒幫助）
+    var others = res && res.status === 'ok' && !res.confident
+      ? res.candidates.slice(1).filter(function (c) { return !c.branch; }).slice(0, 2)
+        .map(function (c) { return c.name + ' ' + c.id; }).join('；')
+      : '';
     var color = null;
     if (!res || res.status !== 'ok') { stats.notFound++; color = FILL_COLORS.invalid; }
     else if (res.confident) stats.confident++;

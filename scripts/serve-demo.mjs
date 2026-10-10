@@ -22,6 +22,7 @@ http.createServer((req, res) => {
   }
   let file;
   if (url === '/') file = path.join(root, 'demo/index.html');
+  else if (url === '/snapshot.json') file = path.join(root, 'data/snapshot.json');
   else if (url.startsWith('/demo/')) file = path.join(root, url);
   else if (url.startsWith('/src/')) file = path.join(root, url);
   else if (url.startsWith('/v1/')) file = path.join(root, 'data/out', url);

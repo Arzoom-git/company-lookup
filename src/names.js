@@ -51,7 +51,8 @@ var COMMON_CHARS_ = '公司有限股份業';
 function isCommonChar_(ch) { return COMMON_CHARS_.indexOf(ch) >= 0; }
 
 // 排名：分數越小越前面。完全同名 > 名稱包含 > 字依序出現；本公司 > 分公司；資本額大、名稱短的優先
-var MATCH_EXACT = 0, MATCH_CONTAINS = 40, MATCH_IN_ORDER = 100;
+// 權重是用 40 個常見簡稱（台積電、中鋼、富邦金控…）實測調出來的：第一名對 38/40，標「確定」的全對（2026-10-10）
+var MATCH_EXACT = 0, MATCH_CONTAINS = 30, MATCH_IN_ORDER = 60, CAPITAL_WEIGHT = 30;
 
 function matchTier(query, rec) {
   var full = normalizeName(rec[1]);
@@ -61,7 +62,7 @@ function matchTier(query, rec) {
 
 function scoreCandidate(query, rec) {
   return matchTier(query, rec) + (rec[3] ? 200 : 0)
-    - 20 * Math.log(Number(rec[2] || 0) + 1) / Math.LN10 + nameCore(normalizeName(rec[1])).length;
+    - CAPITAL_WEIGHT * Math.log(Number(rec[2] || 0) + 1) / Math.LN10 + nameCore(normalizeName(rec[1])).length;
 }
 
 // 查詢字串整理成比對用的樣子（去掉「股份有限公司」等字尾）

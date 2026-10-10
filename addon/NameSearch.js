@@ -3,7 +3,7 @@
 
 var NAME_DATA_URL = DATA_BASE_URL + 'n/';
 var NAME_FETCH_BATCH = 8; // 單一字的檔最大約 4 MB，一次不要抓太多
-var NAME_TOO_VAGUE = '名稱太籠統（只有「公司」「有限」這類字）';
+var NAME_TOO_VAGUE = '名稱太籠統';
 var NAME_NOT_FOUND = '查無';
 var NAME_RESULT_FIELDS = ['統編', '名稱', '比對結果'];
 
@@ -45,10 +45,10 @@ function COMPANY_ID_BY_NAME(name, field) {
   return 名稱找統編(name, field);
 }
 
-// 一個查詢結果 → [統編, 正式名稱, 比對結果]
+// 一個查詢結果 → [統編, 正式名稱, 比對結果]。找不到時原因只寫在「比對結果」，不重複
 function describeNameResult_(res) {
-  if (!res || res.status === 'notFound') return ['', NAME_NOT_FOUND, NAME_NOT_FOUND];
-  if (res.status === 'vague') return ['', NAME_TOO_VAGUE, NAME_TOO_VAGUE];
+  if (!res || res.status === 'notFound') return ['', '', NAME_NOT_FOUND];
+  if (res.status === 'vague') return ['', '', NAME_TOO_VAGUE];
   var top = res.candidates[0];
   return [top.id, top.name, res.confident ? '確定' : '請確認'];
 }

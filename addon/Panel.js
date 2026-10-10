@@ -42,7 +42,9 @@ function getSheetInfo() {
       else if (typeof v === 'string' && /[一-鿿]{2,}/.test(v)) nameHits += /公司|企業|行$|社$/.test(v) ? 2 : 1;
     }
     var head = hasHeader ? String(sample[0][c] || '').trim() : '';
-    if (/名稱|公司|廠商|客戶|企業/.test(head)) nameHits += 10;
+    // 標題加分只給內容真的有中文名稱的欄（「廠商統編」那種統編欄不算）
+    if (nameHits > hits && /名稱|公司|廠商|客戶|企業/.test(head)) nameHits += 10;
+    if (hits >= nameHits) nameHits = 0;
     var empty = sample.every(function (row, r) { return (hasHeader && r === 0) || row[c] === '' || row[c] === null; });
     if (empty) continue; // 空的欄不列出來
     columns.push({ index: c + 1, letter: columnLetter_(c + 1), header: head });
@@ -90,8 +92,9 @@ function fillCompanyData(options) {
       stats.blank++;
       fields.forEach(function () { row.push(''); });
     } else if (!ids[i]) {
+      // 有「統編檢查」欄時原因已經寫在那裡，資料欄留白就好
       stats.invalid++; color = FILL_COLORS.invalid;
-      fields.forEach(function (f, k) { row.push(k === 0 ? '統編格式錯誤' : ''); });
+      fields.forEach(function (f, k) { row.push(k === 0 && !options.check ? '統編有誤' : ''); });
     } else if (!found[ids[i]]) {
       stats.notFound++; color = FILL_COLORS.notFound;
       fields.forEach(function (f, k) { row.push(k === 0 ? NOT_FOUND : ''); });
@@ -114,7 +117,7 @@ function fillCompanyIds(options) {
   if (!col) throw new Error('請選公司名稱在哪一欄');
   var src = readColumn_(sheet, col, options.hasHeader);
   if (columnKind_(src.cells) === 'ids') throw new Error('這一欄是統編，請改用上面的「用統編查公司」');
-  var results = searchNames_(src.cells.filter(function (v) { return v !== '' && v !== null; }).map(String), 3);
+  var results = searchNames_(src.cells.filter(function (v) { return v !== '' && v !== null; }).map(String), 6);
 
   var headers = ['統編', '正式名稱', '比對結果', '其他可能'];
   var stats = { confident: 0, check: 0, notFound: 0, blank: 0 };
@@ -123,7 +126,11 @@ function fillCompanyIds(options) {
     if (v === '' || v === null) { stats.blank++; colors.push([null, null, null, null]); return ['', '', '', '']; }
     var res = results[String(v)];
     var d = describeNameResult_(res);
-    var others = res && res.candidates ? res.candidates.slice(1).map(function (c) { return c.name + ' ' + c.id; }).join('；') : '';
+    // 「其他可能」只給需要確認的列，而且不列分公司（同一家公司的分公司對選擇沒幫助）
+    var others = res && res.status === 'ok' && !res.confident
+      ? res.candidates.slice(1).filter(function (c) { return !c.branch; }).slice(0, 2)
+        .map(function (c) { return c.name + ' ' + c.id; }).join('；')
+      : '';
     var color = null;
     if (!res || res.status !== 'ok') { stats.notFound++; color = FILL_COLORS.invalid; }
     else if (res.confident) stats.confident++;

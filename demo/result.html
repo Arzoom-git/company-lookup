@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>查詢結果預覽</title>
+<style>
+  :root { --grid: #e1e3e6; --head: #f8f9fa; --head-ink: #5f6368; --ink: #202124; --hdr: #e8f0fe; }
+  body { margin: 0; padding: 16px; font: 13px/1.4 Arial, "Noto Sans TC", sans-serif; color: var(--ink); background: #f9fbfd; }
+  h2 { font-size: 14px; margin: 24px 0 8px; }
+  h2:first-child { margin-top: 0; }
+  .wrap { overflow: auto; background: #fff; border: 1px solid var(--grid); }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid var(--grid); height: 22px; padding: 0 6px; white-space: nowrap; }
+  th { background: var(--head); color: var(--head-ink); font-weight: normal; min-width: 30px; }
+  td.num { text-align: right; }
+  tr.frozen td { border-bottom: 3px solid #c0c4c8; }
+</style>
+</head>
+<body>
+<div id="out"></div>
+<script>
+  // 跟 Panel.js 一樣：新增的結果欄標題是淡藍底粗體、凍結第 1 列、資本額千分位、統編是文字
+  fetch('/snapshot.json').then(r => r.json()).then(list => {
+    document.getElementById('out').innerHTML = list.map(({ title, grid, bg }) => {
+      const width = Math.max(...grid.map(r => r.length));
+      const capCol = grid[0].indexOf('資本額');
+      const original = new Set(grid[0].map((h, i) => (bg[`1,${i + 1}`] === undefined && !['統編', '正式名稱', '比對結果', '其他可能', '統編檢查', '名稱', '地址', '資本額', '組織別'].includes(h)) ? i : -1));
+      let h = '<tr><th></th>' + Array.from({ length: width }, (_, i) => `<th>${String.fromCharCode(65 + i)}</th>`).join('') + '</tr>';
+      grid.forEach((row, r) => {
+        h += `<tr class="${r === 0 ? 'frozen' : ''}"><th>${r + 1}</th>`;
+        for (let c = 0; c < width; c++) {
+          let v = row[c] ?? '';
+          const color = r === 0 ? (original.has(c) ? '' : 'var(--hdr)') : (bg[`${r + 1},${c + 1}`] || '');
+          const isNum = typeof v === 'number';
+          if (c === capCol && isNum) v = v.toLocaleString('en-US');
+          h += `<td class="${isNum ? 'num' : ''}" style="${color ? `background:${color};` : ''}${r === 0 && !original.has(c) ? 'font-weight:bold;' : ''}">${String(v).replace(/</g, '&lt;')}</td>`;
+        }
+        h += '</tr>';
+      });
+      return `<h2>${title}</h2><div class="wrap"><table>${h}</table></div>`;
+    }).join('');
+  });
+</script>
+</body>
+</html>

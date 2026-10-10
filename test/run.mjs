@@ -131,7 +131,7 @@ test('面板：猜統編欄、結果插在統編欄右邊、查無與格式錯�
   assert.deepEqual({ ...s }, { found: 2, notFound: 1, invalid: 1, blank: 1, firstColumn: 'C', lastColumn: 'E', addedHeaderRow: false, updated: false });
   assert.deepEqual(grid[0], ['廠商', '統編', '統編檢查', '名稱', '資本額', '備註']);
   assert.deepEqual(grid[1], ['台積電', '22099131', '正確', '台灣積體電路製造股份有限公司', 259323700670, '']);
-  assert.deepEqual(grid[2].slice(2, 5), ['檢查碼錯誤', '統編格式錯誤', '']);
+  assert.deepEqual(grid[2].slice(2, 5), ['檢查碼錯誤', '', '']);
   assert.deepEqual(grid[3], ['小店', '38965019', '正確', '查無（可能不是公司或已不營業）', '', 'x']);
   assert.deepEqual(grid[5].slice(2, 5), ['正確', '測試"引號"有限公司', 1000000]);
   assert.equal(fake.bg['3,3'], '#fde2e1');
@@ -212,10 +212,10 @@ test('名稱找統編：簡稱、大公司優先、分公司排後面、太籠�
   assert.equal(ctx.名稱找統編('鴻海'), '04541302');
   assert.equal(ctx.名稱找統編('台灣銀行'), '03557311');
   assert.equal(ctx.名稱找統編('華碩電腦股份有限公司', '名稱'), '華碩電腦股份有限公司');
-  assert.deepEqual([...ctx.名稱找統編('有限公司', '全部')[0]], ['', '名稱太籠統（只有「公司」「有限」這類字）', '名稱太籠統（只有「公司」「有限」這類字）']);
+  assert.deepEqual([...ctx.名稱找統編('有限公司', '全部')[0]], ['', '', '名稱太籠統']);
   assert.equal(ctx.名稱找統編('不存在的龘公司'), '');
   assert.deepEqual(ctx.名稱找統編([['台積電'], [''], ['鴻海']]).map((r) => r[0]), ['22099131', '', '04541302']);
-  assert.equal(ctx.COMPANY_ID_BY_NAME('長榮航空', '名稱'), '查無');
+  assert.equal(ctx.COMPANY_ID_BY_NAME('長榮航空', '比對結果'), '查無');
 });
 
 test('面板：整欄用名稱找統編，請確認上黃色，查無上紅色', () => {
@@ -228,8 +228,9 @@ test('面板：整欄用名稱找統編，請確認上黃色，查無上紅色',
   assert.deepEqual(grid[0].slice(1), ['統編', '正式名稱', '比對結果', '其他可能']);
   assert.deepEqual(grid[1].slice(1, 4), ['23638777', '華碩電腦股份有限公司', '確定']);
   assert.equal(grid[2][1], '04541302');
-  assert.match(grid[2][4], /鴻海有限公司 27448897/);
-  assert.equal(grid[3][2], '查無');
+  assert.equal(grid[2][3], '確定');
+  assert.equal(grid[2][4], ''); // 確定的列不列其他可能
+  assert.equal(grid[3][3], '查無');
   assert.equal(fake.bg['4,2'], '#fde2e1');
   const r = ctx.searchCompanyName('華碩');
   assert.equal(r.candidates[0].id, '23638777');
@@ -275,4 +276,11 @@ test('面板：選錯欄或選到空欄會講清楚，不會亂插欄', () => {
   assert.equal(grid[0].length, 2); // 什麼都沒插
   const names = loadAddon([['公司'], ['華碩電腦']]);
   assert.throws(() => names.ctx.fillCompanyData({ column: 1, fields: ['名稱'] }), /看起來是公司名稱/);
+});
+
+test('面板：標題叫「廠商統編」的統編欄，不會被當成名稱欄', () => {
+  const { ctx } = loadAddon([['廠商統編', '金額'], ['96979933', 1], ['22099131', 2]]);
+  const info = ctx.getSheetInfo();
+  assert.equal(info.guess, 1);
+  assert.equal(info.nameGuess, null);
 });
