@@ -43,6 +43,8 @@ function getSheetInfo() {
     }
     var head = hasHeader ? String(sample[0][c] || '').trim() : '';
     if (/名稱|公司|廠商|客戶|企業/.test(head)) nameHits += 10;
+    var empty = sample.every(function (row, r) { return (hasHeader && r === 0) || row[c] === '' || row[c] === null; });
+    if (empty) continue; // 空的欄不列出來
     columns.push({ index: c + 1, letter: columnLetter_(c + 1), header: head });
     if (hits > best) { best = hits; guess = c + 1; }
     if (nameHits > nameBest) { nameBest = nameHits; nameGuess = c + 1; }
@@ -73,6 +75,7 @@ function fillCompanyData(options) {
   if (!col) throw new Error('請選統編在哪一欄');
   if (!fields.length && !options.check) throw new Error('至少勾一個要填的資料');
   var src = readColumn_(sheet, col, options.hasHeader);
+  if (columnKind_(src.cells) === 'names') throw new Error('這一欄看起來是公司名稱，請改用上面的「用名稱找統編」');
 
   var ids = src.cells.map(function (v) { var id = normalizeTaxId(v); return id && isValidTaxIdChecksum(id) ? id : null; });
   var found = fetchCompanies_(ids.filter(function (id) { return id; }));
@@ -110,6 +113,7 @@ function fillCompanyIds(options) {
   var col = Number(options.column);
   if (!col) throw new Error('請選公司名稱在哪一欄');
   var src = readColumn_(sheet, col, options.hasHeader);
+  if (columnKind_(src.cells) === 'ids') throw new Error('這一欄是統編，請改用上面的「用統編查公司」');
   var results = searchNames_(src.cells.filter(function (v) { return v !== '' && v !== null; }).map(String), 3);
 
   var headers = ['統編', '正式名稱', '比對結果', '其他可能'];
@@ -140,19 +144,38 @@ function readColumn_(sheet, col, hasHeader) {
   var startRow = hasHeader ? 2 : 1;
   if (lastRow < startRow) throw new Error('那一欄沒有資料');
   var cells = sheet.getRange(startRow, col, lastRow - startRow + 1, 1).getValues().map(function (r) { return r[0]; });
+  if (!cells.some(function (v) { return v !== '' && v !== null; })) throw new Error(columnLetter_(col) + ' 欄是空的，請選有資料的那一欄');
   return { col: col, hasHeader: hasHeader, startRow: startRow, cells: cells };
 }
 
-// 在來源欄右邊插入新欄寫結果。沒有標題列就在最上面插一列，來源欄也補上標題
+// 這一欄大多是統編（ids）、大多是中文名稱（names），或看不出來（mixed）
+function columnKind_(cells) {
+  var ids = 0, names = 0, n = 0;
+  cells.forEach(function (v) {
+    if (v === '' || v === null) return;
+    n++;
+    var id = normalizeTaxId(v);
+    if (id && isValidTaxIdChecksum(id)) ids++;
+    else if (/[一-鿿]/.test(String(v))) names++;
+  });
+  if (ids * 2 > n) return 'ids';
+  if (names * 2 > n) return 'names';
+  return 'mixed';
+}
+
+// 在來源欄右邊插入新欄寫結果。沒有標題列就在最上面插一列，來源欄也補上標題。
+// 右邊已經是同一組結果欄（再按一次）就直接覆蓋更新，不再多插一組。
 function writeResults_(sheet, src, sourceHeader, headers, rows, colors, formats, stats) {
   var startRow = src.startRow;
+  var outCol = src.col + 1;
+  var rerun = src.hasHeader && sheet.getLastColumn() >= src.col + headers.length &&
+    sheet.getRange(1, outCol, 1, headers.length).getValues()[0].join('\t') === headers.join('\t');
   if (!src.hasHeader) {
     sheet.insertRowBefore(1);
     startRow += 1;
     sheet.getRange(1, src.col).setValue(sourceHeader).setFontWeight('bold').setBackground(HEADER_COLOR);
   }
-  sheet.insertColumnsAfter(src.col, headers.length);
-  var outCol = src.col + 1;
+  if (!rerun) sheet.insertColumnsAfter(src.col, headers.length);
   sheet.getRange(1, outCol, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground(HEADER_COLOR);
   formats.forEach(function (f, i) { if (f) sheet.getRange(startRow, outCol + i, rows.length, 1).setNumberFormat(f); });
   var body = sheet.getRange(startRow, outCol, rows.length, headers.length);
@@ -164,6 +187,7 @@ function writeResults_(sheet, src, sourceHeader, headers, rows, colors, formats,
   stats.firstColumn = columnLetter_(outCol);
   stats.lastColumn = columnLetter_(outCol + headers.length - 1);
   stats.addedHeaderRow = !src.hasHeader;
+  stats.updated = rerun;
   return stats;
 }
 

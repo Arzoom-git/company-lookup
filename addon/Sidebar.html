@@ -56,7 +56,6 @@
 
     <h2>整欄一起找</h2>
     <select id="nameCol" aria-label="公司名稱在哪一欄"><option>讀取中…</option></select>
-    <label class="check"><input type="checkbox" id="nameHeader"> 第一列是標題</label>
     <button class="main" id="nameGo" disabled>開始找統編</button>
     <div class="hint">會在名稱那一欄的右邊插入：統編、正式名稱、比對結果、其他可能。<br>黃色＝請確認，紅色＝查無。</div>
     <div class="result" id="nameResult"></div>
@@ -104,9 +103,10 @@
     } else {
       $('col').innerHTML = columnOptions(info, info.guess);
       $('nameCol').innerHTML = columnOptions(info, info.nameGuess);
-      $('nameHeader').checked = !!info.hasHeader;
       $('colHint').textContent = info.guess ? '已自動選出看起來像統編的那一欄。' : '找不到像統編的欄位，請手動選。';
       $('go').disabled = $('nameGo').disabled = false;
+      // 表上只有統編、沒有公司名稱 → 直接打開「用統編查公司」
+      if (info.guess && !info.nameGuess) document.querySelector('.tab[data-pane="byId"]').click();
     }
     $('fields').innerHTML = info.fields.map(function (f) {
       return '<label><input type="checkbox" value="' + f + '"' + (DEFAULT_FIELDS.indexOf(f) >= 0 ? ' checked' : '') + '> ' + f + '</label>';
@@ -147,7 +147,7 @@
       if (s.notFound) lines.push('<span class="chip" style="background:var(--bad-bg)"></span>查無 ' + s.notFound + ' 家');
       show('nameResult', lines.join('<br>'));
     }, function (e) { btn.done('開始找統編'); show('nameResult', '<span class="err">' + esc(msg(e)) + '</span>'); })
-      .fillCompanyIds({ column: Number($('nameCol').value), hasHeader: $('nameHeader').checked });
+      .fillCompanyIds({ column: Number($('nameCol').value) });
   });
 
   // 整欄用統編查
@@ -166,7 +166,7 @@
 
   function done(s) {
     var where = s.firstColumn + (s.lastColumn !== s.firstColumn ? '–' + s.lastColumn : '') + ' 欄';
-    return '<span class="ok">完成</span>，插在 ' + where + (s.addedHeaderRow ? '<br>（原本沒有標題列，已在最上面補一列標題）' : '');
+    return '<span class="ok">' + (s.updated ? '已更新' : '完成') + '</span>，' + (s.updated ? '' : '插在 ') + where + (s.addedHeaderRow ? '<br>（原本沒有標題列，已在最上面補一列標題）' : '');
   }
   function busy(btn, text) {
     btn.disabled = true; btn.textContent = text;

@@ -128,7 +128,7 @@ test('面板：猜統編欄、結果插在統編欄右邊、查無與格式錯�
   assert.equal(info.hasHeader, true);
 
   const s = ctx.fillCompanyData({ column: 2, fields: ['名稱', '資本額'], check: true });
-  assert.deepEqual({ ...s }, { found: 2, notFound: 1, invalid: 1, blank: 1, firstColumn: 'C', lastColumn: 'E', addedHeaderRow: false });
+  assert.deepEqual({ ...s }, { found: 2, notFound: 1, invalid: 1, blank: 1, firstColumn: 'C', lastColumn: 'E', addedHeaderRow: false, updated: false });
   assert.deepEqual(grid[0], ['廠商', '統編', '統編檢查', '名稱', '資本額', '備註']);
   assert.deepEqual(grid[1], ['台積電', '22099131', '正確', '台灣積體電路製造股份有限公司', 259323700670, '']);
   assert.deepEqual(grid[2].slice(2, 5), ['檢查碼錯誤', '統編格式錯誤', '']);
@@ -251,4 +251,28 @@ test('顯示用整理：全形英數轉半形、去掉全形空白', async () =>
   assert.equal(tidyText('臺北市中正區信義路１段２１－３號'), '臺北市中正區信義路1段21-3號');
   assert.equal(tidyText('新竹市東　區'), '新竹市東區');
   assert.equal(tidyText('ＡＢＣ（台灣）有限公司'), 'ABC(台灣)有限公司');
+});
+
+test('面板：按了好幾次只會更新同一組欄，不會一直多插', () => {
+  const grid = [['統編', '備註'], ['22099131', 'a'], ['96979933', 'b']];
+  const { ctx } = loadAddon(grid);
+  ctx.fillCompanyData({ column: 1, fields: ['名稱'], check: false });
+  const again = ctx.fillCompanyData({ column: 1, fields: ['名稱'], check: false });
+  assert.equal(again.updated, true);
+  assert.deepEqual(grid[0], ['統編', '名稱', '備註']);
+  assert.equal(grid[2][1], '查無（可能不是公司或已不營業）');
+});
+
+test('面板：選錯欄或選到空欄會講清楚，不會亂插欄', () => {
+  const grid = [['96979933', ''], ['22099131', '']];
+  const { ctx } = loadAddon(grid);
+  const info = ctx.getSheetInfo();
+  assert.deepEqual([...info.columns].map((c) => c.letter), ['A']); // 空的 B 欄不列
+  assert.equal(info.guess, 1);
+  assert.equal(info.nameGuess, null);
+  assert.throws(() => ctx.fillCompanyIds({ column: 1 }), /這一欄是統編/);
+  assert.throws(() => ctx.fillCompanyIds({ column: 2 }), /B 欄是空的/);
+  assert.equal(grid[0].length, 2); // 什麼都沒插
+  const names = loadAddon([['公司'], ['華碩電腦']]);
+  assert.throws(() => names.ctx.fillCompanyData({ column: 1, fields: ['名稱'] }), /看起來是公司名稱/);
 });
