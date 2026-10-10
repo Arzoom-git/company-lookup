@@ -16,6 +16,11 @@ const out = [
   '',
   read('addon/Lookup.js').trim(),
   '',
+  read('addon/Panel.js').trim(),
+  '',
+  '// 側邊面板的畫面（原檔 addon/Sidebar.html）',
+  'var SIDEBAR_HTML_ = ' + JSON.stringify(read('addon/Sidebar.html')) + ';',
+  '',
 ].join('\n');
 fs.writeFileSync(path.join(root, 'addon/貼到AppsScript.js'), out);
 console.log('addon/貼到AppsScript.js', out.length, 'chars');

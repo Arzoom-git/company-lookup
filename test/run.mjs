@@ -56,10 +56,26 @@ test('切檔：只收公司，獨資不收', () => {
 });
 
 // 模擬 Apps Script：UrlFetchApp 讀剛剛建好的小檔，CacheService 放記憶體
-function loadAddon() {
+// 假的工作表：grid 是二維陣列（第 1 列＝grid[0]），記錄寫入的值與底色
+function fakeSheet(grid) {
+  const bg = {};
+  const width = () => Math.max(0, ...grid.map((r) => r.length));
+  const range = (row, col, h, w) => ({
+    getValues: () => Array.from({ length: h }, (_, i) => Array.from({ length: w }, (_, j) => grid[row - 1 + i]?.[col - 1 + j] ?? '')),
+    setValues(v) { v.forEach((r, i) => r.forEach((x, j) => { (grid[row - 1 + i] ||= [])[col - 1 + j] = x; })); return this; },
+    setBackgrounds(v) { v.forEach((r, i) => r.forEach((x, j) => { bg[`${row + i},${col + j}`] = x; })); return this; },
+    setFontWeight() { return this; },
+    setNumberFormat() { return this; },
+  });
+  return { grid, bg, sheet: { getName: () => '工作表1', getLastRow: () => grid.length, getLastColumn: width, getRange: range } };
+}
+
+function loadAddon(grid = []) {
   const fetched = [];
   const store = new Map();
+  const fake = fakeSheet(grid);
   const ctx = {
+    SpreadsheetApp: { getActiveSheet: () => fake.sheet },
     UrlFetchApp: {
       fetchAll: (reqs) => reqs.map(({ url }) => {
         fetched.push(url);
@@ -76,9 +92,49 @@ function loadAddon() {
     },
   };
   vm.createContext(ctx);
-  for (const f of ['src/taxid.js', 'addon/Lookup.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
-  return { ctx, fetched };
+  for (const f of ['src/taxid.js', 'addon/Lookup.js', 'addon/Panel.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+  return { ctx, fetched, fake };
 }
+
+test('面板：猜統編欄、填到最右邊的新欄、查無與格式錯誤上色', () => {
+  const grid = [
+    ['廠商', '統編', '備註'],
+    ['台積電', '22099131', ''],
+    ['亂打', '22099132', ''],
+    ['小店', '38965019', 'x'],
+    ['空白', '', ''],
+    ['數字型', 4595257, ''],
+  ];
+  const { ctx, fake } = loadAddon(grid);
+  const info = ctx.getSheetInfo();
+  assert.equal(info.guess, 2);
+  assert.equal(info.columns[1].header, '統編');
+
+  const s = ctx.fillCompanyData({ column: 2, fields: ['名稱', '資本額'], check: true });
+  assert.deepEqual({ ...s }, { found: 2, notFound: 1, invalid: 1, blank: 1, firstColumn: 'D', lastColumn: 'F' });
+  assert.deepEqual(grid[0].slice(3), ['統編檢查', '名稱', '資本額']);
+  assert.deepEqual(grid[1].slice(3), ['正確', '台灣積體電路製造股份有限公司', 259323700670]);
+  assert.deepEqual(grid[2].slice(3), ['檢查碼錯誤', '統編格式錯誤', '']);
+  assert.deepEqual(grid[3].slice(3), ['正確', '查無（可能不是公司或已不營業）', '']);
+  assert.deepEqual(grid[5].slice(3), ['正確', '測試"引號"有限公司', 1000000]);
+  assert.equal(grid[0][0], '廠商'); // 原資料沒被動到
+  assert.equal(fake.bg['3,4'], '#fde2e1');
+  assert.equal(fake.bg['4,5'], '#fff4c2');
+  assert.equal(fake.bg['2,4'], null);
+});
+
+test('面板：沒有標題列時從第 1 列開始', () => {
+  const grid = [['22099131'], ['22099104']];
+  const { ctx } = loadAddon(grid);
+  const s = ctx.fillCompanyData({ column: 1, fields: ['名稱'], check: false });
+  assert.equal(s.found, 2);
+  assert.deepEqual(grid.map((r) => r[1]), ['台灣積體電路製造股份有限公司', '台灣積體電路製造股份有限公司台北分公司']);
+});
+
+test('面板：沒勾任何欄位要報錯', () => {
+  const { ctx } = loadAddon([['22099131']]);
+  assert.throws(() => ctx.fillCompanyData({ column: 1, fields: [], check: false }), /至少勾一個/);
+});
 
 test('統編查詢：單格、欄位、查無、格式錯誤', () => {
   const { ctx } = loadAddon();

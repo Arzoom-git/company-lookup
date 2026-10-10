@@ -69,38 +69,55 @@ function COMPANY_LOOKUP(id, field) {
   return 統編查詢(id, field);
 }
 
-// 依前 4 碼分組，同一個小檔只抓一次；查過的公司放快取
+// 依前 4 碼分組，同一個小檔只抓一次；查過的公司放快取。
+// 名單很長時分批抓、分批寫快取，避免一次送出太多請求。
+var FETCH_BATCH = 50;
+var CACHE_BATCH = 500;
+
 function fetchCompanies_(ids) {
   var cache = CacheService.getScriptCache();
   var result = {};
-  var unique = ids.filter(function (id, i) { return ids.indexOf(id) === i; });
-  var cached = cache.getAll(unique.map(function (id) { return 'c:' + id; }));
+  var seen = {};
+  var unique = ids.filter(function (id) { if (seen[id]) return false; seen[id] = true; return true; });
   var missing = {};
-  unique.forEach(function (id) {
-    var hit = cached['c:' + id];
-    if (hit) { var rec = JSON.parse(hit); if (rec) result[id] = rec; }
-    else (missing[id.slice(0, 4)] = missing[id.slice(0, 4)] || []).push(id);
-  });
-
-  var prefixes = Object.keys(missing);
-  if (!prefixes.length) return result;
-  var responses = UrlFetchApp.fetchAll(prefixes.map(function (p) {
-    return { url: DATA_BASE_URL + p + '.json', muteHttpExceptions: true };
-  }));
-  var toCache = {};
-  prefixes.forEach(function (p, i) {
-    var res = responses[i];
-    var code = res.getResponseCode();
-    if (code !== 200 && code !== 404) throw new Error('資料服務暫時連不上（' + code + '），請稍後再試');
-    var shard = code === 200 ? JSON.parse(res.getContentText()) : {};
-    missing[p].forEach(function (id) {
-      var rec = shard[id] || null;
-      if (rec) result[id] = rec;
-      toCache['c:' + id] = JSON.stringify(rec);
+  chunk_(unique, CACHE_BATCH).forEach(function (part) {
+    var cached = cache.getAll(part.map(function (id) { return 'c:' + id; }));
+    part.forEach(function (id) {
+      var hit = cached['c:' + id];
+      if (hit) { var rec = JSON.parse(hit); if (rec) result[id] = rec; }
+      else (missing[id.slice(0, 4)] = missing[id.slice(0, 4)] || []).push(id);
     });
   });
-  cache.putAll(toCache, CACHE_SECONDS);
+
+  var toCache = {};
+  chunk_(Object.keys(missing), FETCH_BATCH).forEach(function (prefixes) {
+    var responses = UrlFetchApp.fetchAll(prefixes.map(function (p) {
+      return { url: DATA_BASE_URL + p + '.json', muteHttpExceptions: true };
+    }));
+    prefixes.forEach(function (p, i) {
+      var code = responses[i].getResponseCode();
+      if (code !== 200 && code !== 404) throw new Error('資料服務暫時連不上（' + code + '），請稍後再試');
+      var shard = code === 200 ? JSON.parse(responses[i].getContentText()) : {};
+      missing[p].forEach(function (id) {
+        var rec = shard[id] || null;
+        if (rec) result[id] = rec;
+        toCache['c:' + id] = JSON.stringify(rec);
+      });
+    });
+  });
+  var keys = Object.keys(toCache);
+  chunk_(keys, CACHE_BATCH).forEach(function (part) {
+    var obj = {};
+    part.forEach(function (k) { obj[k] = toCache[k]; });
+    cache.putAll(obj, CACHE_SECONDS);
+  });
   return result;
+}
+
+function chunk_(list, size) {
+  var out = [];
+  for (var i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
 }
 
 function mapCells_(value, fn) {

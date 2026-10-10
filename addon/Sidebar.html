@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+<head>
+<base target="_top">
+<style>
+  :root { --ink: #202124; --muted: #5f6368; --line: #dadce0; --accent: #1a73e8; --accent-ink: #fff; --ok: #188038; --bad: #c5221f; --warn-bg: #fff4c2; --bad-bg: #fde2e1; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; font: 13px/1.5 Arial, "Noto Sans TC", sans-serif; color: var(--ink); }
+  h2 { font-size: 14px; margin: 18px 0 8px; }
+  h2:first-child { margin-top: 0; }
+  select { width: 100%; padding: 6px 8px; font: inherit; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
+  label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .check { margin-top: 12px; }
+  button { margin-top: 18px; width: 100%; padding: 9px; font: inherit; font-weight: bold; border: 0; border-radius: 4px; background: var(--accent); color: var(--accent-ink); cursor: pointer; }
+  button:disabled { opacity: .55; cursor: default; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .result { margin-top: 16px; padding: 10px 12px; border-radius: 4px; background: #f1f3f4; display: none; }
+  .result.show { display: block; }
+  .result .ok { color: var(--ok); font-weight: bold; }
+  .result .err { color: var(--bad); }
+  .chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; border: 1px solid var(--line); }
+  .foot { margin-top: 24px; color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+  <h2>統編在哪一欄？</h2>
+  <select id="col"><option>讀取中…</option></select>
+  <div class="hint" id="colHint"></div>
+
+  <h2>要填哪些資料？</h2>
+  <div class="fields" id="fields"></div>
+  <label class="check"><input type="checkbox" id="check" checked> 順便檢查統編有沒有打錯</label>
+
+  <button id="go" disabled>開始填入</button>
+  <div class="hint">結果會放在最右邊的新欄位，不會覆蓋原本的資料。</div>
+
+  <div class="result" id="result"></div>
+
+  <div class="foot">資料來源：財政部全國營業(稅籍)登記資料集，每日更新，只含公司。</div>
+
+<script>
+  var DEFAULT_FIELDS = ['名稱', '地址', '組織別'];
+  var $ = function (id) { return document.getElementById(id); };
+
+  function load() {
+    google.script.run.withSuccessHandler(render).withFailureHandler(showError).getSheetInfo();
+  }
+
+  function render(info) {
+    var col = $('col');
+    if (!info.columns.length) {
+      col.innerHTML = '<option>這個工作表是空的</option>';
+      $('colHint').textContent = '先在某一欄貼上統編，再重新開啟面板。';
+      return;
+    }
+    col.innerHTML = info.columns.map(function (c) {
+      var label = c.letter + ' 欄' + (c.header ? '：' + c.header : '');
+      return '<option value="' + c.index + '"' + (c.index === info.guess ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+    }).join('');
+    $('colHint').textContent = info.guess ? '已自動選出看起來像統編的那一欄。' : '找不到像統編的欄位，請手動選。';
+    $('fields').innerHTML = info.fields.map(function (f) {
+      return '<label><input type="checkbox" value="' + f + '"' + (DEFAULT_FIELDS.indexOf(f) >= 0 ? ' checked' : '') + '> ' + f + '</label>';
+    }).join('');
+    $('go').disabled = false;
+  }
+
+  $('go').addEventListener('click', function () {
+    var fields = Array.prototype.map.call(document.querySelectorAll('#fields input:checked'), function (el) { return el.value; });
+    var btn = $('go');
+    btn.disabled = true; btn.textContent = '查詢中…';
+    $('result').className = 'result';
+    google.script.run
+      .withSuccessHandler(function (s) {
+        btn.disabled = false; btn.textContent = '開始填入';
+        var lines = ['<span class="ok">完成</span>，填在 ' + s.firstColumn + (s.lastColumn !== s.firstColumn ? '–' + s.lastColumn : '') + ' 欄', '查到 ' + s.found + ' 家'];
+        if (s.notFound) lines.push('<span class="chip" style="background:var(--warn-bg)"></span>查無 ' + s.notFound + ' 家（可能不是公司或已不營業）');
+        if (s.invalid) lines.push('<span class="chip" style="background:var(--bad-bg)"></span>統編格式錯誤 ' + s.invalid + ' 筆');
+        $('result').innerHTML = lines.join('<br>');
+        $('result').className = 'result show';
+      })
+      .withFailureHandler(function (e) { btn.disabled = false; btn.textContent = '開始填入'; showError(e); })
+      .fillCompanyData({ column: Number($('col').value), fields: fields, check: $('check').checked });
+  });
+
+  function showError(e) {
+    $('result').innerHTML = '<span class="err">' + escapeHtml(e && e.message ? e.message : String(e)) + '</span>';
+    $('result').className = 'result show';
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+  }
+
+  load();
+</script>
+</body>
+</html>
