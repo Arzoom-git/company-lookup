@@ -8,7 +8,8 @@ Google 試算表工具：用統編查公司資料、用公司名稱（含簡稱�
 - `src/taxid.js`：統編整理與檢查碼（Node 與 Apps Script 共用，不用 import/export）
 - `src/names.js`：名稱整理、比對（字依序出現即符合）、排名、「確定／請確認」判斷（共用）
 - `scripts/build-shards.mjs`：CSV → `v1/<統編前4碼>.json`（統編查詢）＋ `v1/n/<字的16進位碼>.json` 與 `v1/n/chars.json`（名稱索引）＋ `meta.json`。顯示用文字經 `tidyText` 全形轉半形。欄位順序見 `FIELDS`，改了要同步 `addon/Lookup.js` 的 `LOOKUP_FIELDS`，並把路徑升到 `v2`（舊版還在讀 v1）
-- `addon/`：Apps Script。`Lookup.js`（=統編查詢、=統編檢查）、`NameSearch.js`（=名稱找統編）、`Panel.js`（選單、側邊面板的伺服器端）、`Sidebar.html`（面板畫面）
+- `addon/`：Apps Script。`Lookup.js`（=統編查詢、=統編檢查）、`NameSearch.js`（=名稱找統編）、`NewCompanies.js`（新公司名單：篩選後開新工作表）、`Panel.js`（選單、側邊面板的伺服器端）、`Sidebar.html`（面板畫面，三個分頁）
+- 新公司清單 `v1/new/recent.json`：設立日期近 180 天的公司，含「首次出現在資料裡的日期」。財政部資料會晚 2～3 週才出現，所以「每天新進資料」比「設立日期」更適合業務追新名單。首次出現靠接續前一天發布的檔案（在 Actions 上自動抓線上那份）；2026-10-10 開始追蹤，之前的記成 null
 - `addon/貼到AppsScript.js`：`node scripts/bundle-addon.mjs` 產生的單一檔，使用者整份貼進試算表的 Apps Script（面板 HTML 也包在裡面）。**改了 src/ 或 addon/ 都要重新產生並 commit**
 - `.github/workflows/update-data.yml`：每天台灣時間 05:00 下載、切檔、發布（Pages artifact，資料不進 git）
 - `demo/`：本機預覽（`index.html` 模擬試算表、`/panel` 面板預覽、`result.html` 畫 `data/snapshot.json`），由 `scripts/serve-demo.mjs` 提供
