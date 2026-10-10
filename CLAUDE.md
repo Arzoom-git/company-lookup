@@ -15,6 +15,11 @@ Google 試算表工具：用統編查公司資料、用公司名稱（含簡稱�
 - `demo/`：本機預覽（`index.html` 模擬試算表、`/panel` 面板預覽、`result.html` 畫 `data/snapshot.json`），由 `scripts/serve-demo.mjs` 提供
 - `public/index.html`：Pages 首頁與資料出處（授權條款要求註明出處）
 
+## 誰在用這份規則
+- 試算表外掛：`addon/貼到AppsScript.js`（`node scripts/bundle-addon.mjs`）
+- 使用者的助理系統（Desktop/assistant-app）：`worker/build.mjs` 把 `src/taxid.js`、`src/names.js` 複製進 Worker。**改了這兩個檔，要到 assistant-app 跑 `node worker/build.mjs`、commit、push**，助理才會跟上
+- 資料網址 `https://arzoom-git.github.io/company-lookup/v1/` 的格式（v1）助理也在讀：改格式要升 v2，舊的先留著
+
 ## 指令
 - `node test/run.mjs`：測試（`test/fixture.csv`，不連網；模擬 UrlFetchApp、CacheService、試算表）
 - `node scripts/build-shards.mjs data/raw/BGMOPEN1.csv data/out`：本機用真資料建置（`data/` 不進 git）
