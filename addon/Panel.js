@@ -28,18 +28,76 @@ function getSheetInfo() {
   var lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
   if (lastRow === 0 || lastCol === 0) return { sheetName: sheet.getName(), columns: [], guess: null, fields: LOOKUP_FIELDS };
   var sample = sheet.getRange(1, 1, Math.min(lastRow, 21), lastCol).getValues();
-  var columns = [], guess = null, best = 0;
+  var columns = [], guess = null, best = 0, nameGuess = null, nameBest = 0;
   for (var c = 0; c < lastCol; c++) {
-    var hits = 0;
+    var hits = 0, nameHits = 0;
     for (var r = 0; r < sample.length; r++) {
-      var id = normalizeTaxId(sample[r][c]);
+      var v = sample[r][c];
+      var id = normalizeTaxId(v);
       if (id && isValidTaxIdChecksum(id)) hits++;
+      else if (typeof v === 'string' && /[一-鿿]{2,}/.test(v)) nameHits += /公司|企業|行$|社$/.test(v) ? 2 : 1;
     }
     var head = String(sample[0][c] || '').trim();
+    if (/名稱|公司|廠商|客戶|企業/.test(head)) nameHits += 10;
     columns.push({ index: c + 1, letter: columnLetter_(c + 1), header: head });
     if (hits > best) { best = hits; guess = c + 1; }
+    if (nameHits > nameBest) { nameBest = nameHits; nameGuess = c + 1; }
   }
-  return { sheetName: sheet.getName(), columns: columns, guess: guess, fields: LOOKUP_FIELDS };
+  return { sheetName: sheet.getName(), columns: columns, guess: guess, nameGuess: nameGuess, fields: LOOKUP_FIELDS };
+}
+
+// 用名稱批次找統編。options = { column: 1, hasHeader: true }
+// 寫在最右邊的新欄：統編、正式名稱、比對結果、其他可能；請確認＝黃、查無＝紅
+function fillCompanyIds(options) {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var col = Number(options.column);
+  if (!col) throw new Error('請選公司名稱在哪一欄');
+  var lastRow = sheet.getLastRow();
+  var startRow = options.hasHeader ? 2 : 1;
+  if (lastRow < startRow) throw new Error('名稱那一欄沒有資料');
+  var cells = sheet.getRange(startRow, col, lastRow - startRow + 1, 1).getValues().map(function (r) { return r[0]; });
+  var results = searchNames_(cells.filter(function (v) { return v !== '' && v !== null; }).map(String), 3);
+
+  var headers = ['統編', '正式名稱', '比對結果', '其他可能'];
+  var stats = { confident: 0, check: 0, notFound: 0, blank: 0 };
+  var colors = [];
+  var rows = cells.map(function (v) {
+    if (v === '' || v === null) { stats.blank++; colors.push([null, null, null, null]); return ['', '', '', '']; }
+    var res = results[String(v)];
+    var d = describeNameResult_(res);
+    var others = res && res.candidates ? res.candidates.slice(1).map(function (c) { return c.name + ' ' + c.id; }).join('；') : '';
+    var color = null;
+    if (!res || res.status !== 'ok') { stats.notFound++; color = FILL_COLORS.invalid; }
+    else if (res.confident) stats.confident++;
+    else { stats.check++; color = FILL_COLORS.notFound; }
+    colors.push([color, color, color, color]);
+    return [d[0], d[1], d[2], others];
+  });
+
+  var outCol = sheet.getLastColumn() + 1;
+  if (options.hasHeader) sheet.getRange(1, outCol, 1, headers.length).setValues([headers]).setFontWeight('bold');
+  var body = sheet.getRange(startRow, outCol, rows.length, headers.length);
+  sheet.getRange(startRow, outCol, rows.length, 1).setNumberFormat('@'); // 統編保留開頭的 0
+  body.setValues(rows);
+  body.setBackgrounds(colors);
+  stats.firstColumn = columnLetter_(outCol);
+  stats.lastColumn = columnLetter_(outCol + headers.length - 1);
+  return stats;
+}
+
+// 面板搜尋框：回傳候選清單
+function searchCompanyName(query) {
+  var q = String(query || '').trim();
+  if (!q) return { status: 'empty', candidates: [] };
+  var res = searchNames_([q], 5)[q];
+  return res || { status: 'notFound', candidates: [] };
+}
+
+// 把選到的統編寫進目前選取的儲存格（文字格式，保留開頭的 0）
+function writeToActiveCell(value) {
+  var cell = SpreadsheetApp.getActiveSheet().getActiveCell();
+  cell.setNumberFormat('@').setValue(String(value));
+  return cell.getA1Notation();
 }
 
 // options = { column: 1, fields: ['名稱', '地址'], check: true }

@@ -7,7 +7,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { createRequire } from 'node:module';
 import { parseCsvLine } from './csv.mjs';
+
+const names = createRequire(import.meta.url)('../src/names.js');
 
 export const COMPANY_TYPES = new Set([
   '有限公司', '股份有限公司', '本國公司設立之分公司', '外國公司在台之分公司',
@@ -31,7 +34,31 @@ export function toRecord(f) {
   ];
 }
 
-export async function buildShards(csvFile, outDir, { minCompanies = 500000 } = {}) {
+// 名稱索引：每個字一個檔 n/<16進位碼>.json＝[[統編, 名稱, 資本額, 分公司?1:0], …]，
+// 另有 n/chars.json＝{ 字: 公司數 } 讓查詢端挑最少公司用到的字。太常見的字不建檔。
+export function writeNameIndex(shards, nameDir, max = names.NAME_INDEX_MAX) {
+  const byChar = new Map();
+  for (const obj of shards.values()) {
+    for (const [id, r] of Object.entries(obj)) {
+      const entry = [id, r[0], r[2] ?? 0, r[6] ? 1 : 0];
+      for (const ch of new Set(Array.from(names.normalizeName(r[0])))) {
+        if (!byChar.has(ch)) byChar.set(ch, []);
+        byChar.get(ch).push(entry);
+      }
+    }
+  }
+  fs.mkdirSync(nameDir, { recursive: true });
+  const counts = {};
+  for (const [ch, list] of byChar) {
+    if (list.length > max) continue;
+    counts[ch] = list.length;
+    fs.writeFileSync(path.join(nameDir, `${names.nameIndexKey(ch)}.json`), JSON.stringify(list));
+  }
+  fs.writeFileSync(path.join(nameDir, 'chars.json'), JSON.stringify(counts));
+  return Object.keys(counts).length;
+}
+
+export async function buildShards(csvFile, outDir, { minCompanies = 500000, nameIndexMax } = {}) {
   const rl = readline.createInterface({ input: fs.createReadStream(csvFile, 'utf8'), crlfDelay: Infinity });
   const shards = new Map();
   let header = null, dataDate = null, rows = 0, kept = 0;
@@ -55,8 +82,9 @@ export async function buildShards(csvFile, outDir, { minCompanies = 500000 } = {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   for (const [key, obj] of shards) fs.writeFileSync(path.join(dir, `${key}.json`), JSON.stringify(obj));
+  const nameFiles = writeNameIndex(shards, path.join(dir, 'n'), nameIndexMax);
   const meta = {
-    fields: FIELDS, dataDate, builtAt: new Date().toISOString(), companies: kept, shards: shards.size,
+    fields: FIELDS, dataDate, builtAt: new Date().toISOString(), companies: kept, shards: shards.size, nameFiles,
     source: '財政部財政資訊中心「全國營業(稅籍)登記資料集」，依政府資料開放授權條款－第1版使用',
   };
   fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 1));
@@ -67,5 +95,5 @@ if (process.argv[1]?.endsWith('build-shards.mjs')) {
   const [csv, out] = process.argv.slice(2);
   if (!csv || !out) { console.error('用法：node scripts/build-shards.mjs <csv> <輸出資料夾>'); process.exit(1); }
   const r = await buildShards(csv, out);
-  console.log(`讀 ${r.rows} 筆，收公司 ${r.companies} 家，${r.shards} 個檔，資料日期 ${r.dataDate}`);
+  console.log(`讀 ${r.rows} 筆，收公司 ${r.companies} 家，${r.shards} 個檔，名稱索引 ${r.nameFiles} 個字，資料日期 ${r.dataDate}`);
 }

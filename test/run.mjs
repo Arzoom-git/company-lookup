@@ -43,7 +43,7 @@ const out = fs.mkdtempSync(path.join(os.tmpdir(), 'shards-'));
 const built = await buildShards(path.join(root, 'test/fixture.csv'), out, { minCompanies: 1 });
 
 test('切檔：只收公司，獨資不收', () => {
-  assert.equal(built.companies, 3);
+  assert.equal(built.companies, 8);
   assert.equal(built.dataDate, '10-OCT-26');
   const s = JSON.parse(fs.readFileSync(path.join(out, 'v1/2209.json'), 'utf8'));
   assert.deepEqual(s['22099131'].slice(0, 6), ['台灣積體電路製造股份有限公司', '新竹市東　區科園里科學園區力行六路８號', 259323700670, '1987-03-21', '股份有限公司', true]);
@@ -74,25 +74,29 @@ function loadAddon(grid = []) {
   const fetched = [];
   const store = new Map();
   const fake = fakeSheet(grid);
+  const serve = (url) => {
+    fetched.push(url);
+    const f = path.join(out, 'v1', url.split('/v1/')[1]);
+    const ok = fs.existsSync(f);
+    return { getResponseCode: () => (ok ? 200 : 404), getContentText: () => (ok ? fs.readFileSync(f, 'utf8') : '') };
+  };
   const ctx = {
     SpreadsheetApp: { getActiveSheet: () => fake.sheet },
     UrlFetchApp: {
-      fetchAll: (reqs) => reqs.map(({ url }) => {
-        fetched.push(url);
-        const f = path.join(out, 'v1', url.split('/v1/')[1]);
-        const ok = fs.existsSync(f);
-        return { getResponseCode: () => (ok ? 200 : 404), getContentText: () => (ok ? fs.readFileSync(f, 'utf8') : '') };
-      }),
+      fetch: (url) => serve(url),
+      fetchAll: (reqs) => reqs.map(({ url }) => serve(url)),
     },
     CacheService: {
       getScriptCache: () => ({
+        get: (k) => store.get(k) ?? null,
+        put: (k, v) => { store.set(k, v); },
         getAll: (keys) => Object.fromEntries(keys.filter((k) => store.has(k)).map((k) => [k, store.get(k)])),
         putAll: (obj) => { for (const [k, v] of Object.entries(obj)) store.set(k, v); },
       }),
     },
   };
   vm.createContext(ctx);
-  for (const f of ['src/taxid.js', 'addon/Lookup.js', 'addon/Panel.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+  for (const f of ['src/taxid.js', 'src/names.js', 'addon/Lookup.js', 'addon/NameSearch.js', 'addon/Panel.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
   return { ctx, fetched, fake };
 }
 
@@ -172,4 +176,44 @@ test('統編檢查：一整欄', () => {
   const { ctx } = loadAddon();
   assert.deepEqual(ctx.統編檢查([['22099131'], ['22099132'], ['abc']]), [['正確'], ['檢查碼錯誤'], ['不是 8 碼數字']]);
   assert.equal(ctx.TAXID_CHECK(4595257), '正確');
+});
+
+test('名稱索引：常見字不建檔、臺台視為同一字', () => {
+  const counts = JSON.parse(fs.readFileSync(path.join(out, 'v1/n/chars.json'), 'utf8'));
+  assert.equal(counts['碩'], 2);
+  assert.equal(counts['台'], 3); // 台積電、台積電台北分公司、臺灣銀行
+  assert.equal(counts['臺'], undefined);
+  const tsmc = JSON.parse(fs.readFileSync(path.join(out, 'v1/n/7a4d.json'), 'utf8')); // 積
+  assert.deepEqual(tsmc.map((r) => r[0]).sort(), ['22099104', '22099131']);
+});
+
+test('名稱找統編：簡稱、大公司優先、分公司排後面、太籠統、查無', () => {
+  const { ctx } = loadAddon();
+  assert.equal(ctx.名稱找統編('台積電'), '22099131');
+  assert.equal(ctx.名稱找統編('華碩'), '23638777');
+  assert.equal(ctx.名稱找統編('鴻海'), '04541302');
+  assert.equal(ctx.名稱找統編('台灣銀行'), '03557311');
+  assert.equal(ctx.名稱找統編('華碩電腦股份有限公司', '名稱'), '華碩電腦股份有限公司');
+  assert.deepEqual([...ctx.名稱找統編('有限公司', '全部')[0]], ['', '名稱太籠統（只有「公司」「有限」這類字）', '名稱太籠統（只有「公司」「有限」這類字）']);
+  assert.equal(ctx.名稱找統編('不存在的龘公司'), '');
+  assert.deepEqual(ctx.名稱找統編([['台積電'], [''], ['鴻海']]).map((r) => r[0]), ['22099131', '', '04541302']);
+  assert.equal(ctx.COMPANY_ID_BY_NAME('長榮航空', '名稱'), '查無');
+});
+
+test('面板：整欄用名稱找統編，請確認上黃色，查無上紅色', () => {
+  const grid = [['客戶名稱'], ['華碩電腦'], ['鴻海'], ['龘龘'], [''], ['台積電']];
+  const { ctx, fake } = loadAddon(grid);
+  assert.equal(ctx.getSheetInfo().nameGuess, 1);
+  const s = ctx.fillCompanyIds({ column: 1, hasHeader: true });
+  assert.equal(s.notFound, 1);
+  assert.equal(s.blank, 1);
+  assert.deepEqual(grid[0].slice(1), ['統編', '正式名稱', '比對結果', '其他可能']);
+  assert.deepEqual(grid[1].slice(1, 4), ['23638777', '華碩電腦股份有限公司', '確定']);
+  assert.equal(grid[2][1], '04541302');
+  assert.match(grid[2][4], /鴻海有限公司 27448897/);
+  assert.equal(grid[3][2], '查無');
+  assert.equal(fake.bg['4,2'], '#fde2e1');
+  const r = ctx.searchCompanyName('華碩');
+  assert.equal(r.candidates[0].id, '23638777');
+  assert.equal(r.candidates.length, 2);
 });
