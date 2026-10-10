@@ -25,11 +25,20 @@ export function rocToIso(s) {
   return `${Number(m[1]) + 1911}-${m[2]}-${m[3]}`;
 }
 
+// 顯示用的整理：全形英數與符號轉半形（「１段２１－３」→「1段21-3」），去掉字中間的全形空白（「東　區」→「東區」）
+export function tidyText(s) {
+  return String(s ?? '')
+    .replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/　+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function toRecord(f) {
   const industries = [];
-  for (let i = 9; i <= 15; i += 2) if (f[i]) industries.push(f[i]);
+  for (let i = 9; i <= 15; i += 2) if (f[i]) industries.push(tidyText(f[i]));
   return [
-    f[3], f[0], f[4] === '' ? null : Number(f[4]), rocToIso(f[5]), f[6],
+    tidyText(f[3]), tidyText(f[0]), f[4] === '' ? null : Number(f[4]), rocToIso(f[5]), f[6],
     f[7] === 'Y', f[2] || null, industries.join('、'),
   ];
 }

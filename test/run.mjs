@@ -46,28 +46,39 @@ test('切檔：只收公司，獨資不收', () => {
   assert.equal(built.companies, 8);
   assert.equal(built.dataDate, '10-OCT-26');
   const s = JSON.parse(fs.readFileSync(path.join(out, 'v1/2209.json'), 'utf8'));
-  assert.deepEqual(s['22099131'].slice(0, 6), ['台灣積體電路製造股份有限公司', '新竹市東　區科園里科學園區力行六路８號', 259323700670, '1987-03-21', '股份有限公司', true]);
+  assert.deepEqual(s['22099131'].slice(0, 6), ['台灣積體電路製造股份有限公司', '新竹市東區科園里科學園區力行六路8號', 259323700670, '1987-03-21', '股份有限公司', true]);
   assert.equal(s['22099131'][7], '其他積體電路製造、矽晶圓製造');
   assert.equal(s['22099104'][6], '22099131');
   assert.equal(fs.existsSync(path.join(out, 'v1/3896.json')), false);
   const t = JSON.parse(fs.readFileSync(path.join(out, 'v1/0459.json'), 'utf8'));
   assert.equal(t['04595257'][0], '測試"引號"有限公司');
-  assert.equal(t['04595257'][1], '台中市某路２號，三樓');
+  assert.equal(t['04595257'][1], '台中市某路2號,三樓');
 });
 
 // 模擬 Apps Script：UrlFetchApp 讀剛剛建好的小檔，CacheService 放記憶體
 // 假的工作表：grid 是二維陣列（第 1 列＝grid[0]），記錄寫入的值與底色
 function fakeSheet(grid) {
   const bg = {};
+  let frozen = 0;
   const width = () => Math.max(0, ...grid.map((r) => r.length));
-  const range = (row, col, h, w) => ({
+  const range = (row, col, h = 1, w = 1) => ({
     getValues: () => Array.from({ length: h }, (_, i) => Array.from({ length: w }, (_, j) => grid[row - 1 + i]?.[col - 1 + j] ?? '')),
     setValues(v) { v.forEach((r, i) => r.forEach((x, j) => { (grid[row - 1 + i] ||= [])[col - 1 + j] = x; })); return this; },
+    setValue(x) { (grid[row - 1] ||= [])[col - 1] = x; return this; },
     setBackgrounds(v) { v.forEach((r, i) => r.forEach((x, j) => { bg[`${row + i},${col + j}`] = x; })); return this; },
+    setBackground() { return this; },
     setFontWeight() { return this; },
     setNumberFormat() { return this; },
   });
-  return { grid, bg, sheet: { getName: () => '工作表1', getLastRow: () => grid.length, getLastColumn: width, getRange: range } };
+  const sheet = {
+    getName: () => '工作表1', getLastRow: () => grid.length, getLastColumn: width, getRange: range,
+    insertRowBefore: (r) => { grid.splice(r - 1, 0, []); },
+    insertColumnsAfter: (c, n) => { grid.forEach((row) => { if (row.length > c) row.splice(c, 0, ...Array(n).fill('')); }); },
+    autoResizeColumns: () => {},
+    getFrozenRows: () => frozen,
+    setFrozenRows: (n) => { frozen = n; },
+  };
+  return { grid, bg, sheet };
 }
 
 function loadAddon(grid = []) {
@@ -100,7 +111,7 @@ function loadAddon(grid = []) {
   return { ctx, fetched, fake };
 }
 
-test('面板：猜統編欄、填到最右邊的新欄、查無與格式錯誤上色', () => {
+test('面板：猜統編欄、結果插在統編欄右邊、查無與格式錯誤上色', () => {
   const grid = [
     ['廠商', '統編', '備註'],
     ['台積電', '22099131', ''],
@@ -114,25 +125,32 @@ test('面板：猜統編欄、填到最右邊的新欄、查無與格式錯誤�
   assert.equal(info.guess, 2);
   assert.equal(info.columns[1].header, '統編');
 
+  assert.equal(info.hasHeader, true);
+
   const s = ctx.fillCompanyData({ column: 2, fields: ['名稱', '資本額'], check: true });
-  assert.deepEqual({ ...s }, { found: 2, notFound: 1, invalid: 1, blank: 1, firstColumn: 'D', lastColumn: 'F' });
-  assert.deepEqual(grid[0].slice(3), ['統編檢查', '名稱', '資本額']);
-  assert.deepEqual(grid[1].slice(3), ['正確', '台灣積體電路製造股份有限公司', 259323700670]);
-  assert.deepEqual(grid[2].slice(3), ['檢查碼錯誤', '統編格式錯誤', '']);
-  assert.deepEqual(grid[3].slice(3), ['正確', '查無（可能不是公司或已不營業）', '']);
-  assert.deepEqual(grid[5].slice(3), ['正確', '測試"引號"有限公司', 1000000]);
-  assert.equal(grid[0][0], '廠商'); // 原資料沒被動到
-  assert.equal(fake.bg['3,4'], '#fde2e1');
-  assert.equal(fake.bg['4,5'], '#fff4c2');
-  assert.equal(fake.bg['2,4'], null);
+  assert.deepEqual({ ...s }, { found: 2, notFound: 1, invalid: 1, blank: 1, firstColumn: 'C', lastColumn: 'E', addedHeaderRow: false });
+  assert.deepEqual(grid[0], ['廠商', '統編', '統編檢查', '名稱', '資本額', '備註']);
+  assert.deepEqual(grid[1], ['台積電', '22099131', '正確', '台灣積體電路製造股份有限公司', 259323700670, '']);
+  assert.deepEqual(grid[2].slice(2, 5), ['檢查碼錯誤', '統編格式錯誤', '']);
+  assert.deepEqual(grid[3], ['小店', '38965019', '正確', '查無（可能不是公司或已不營業）', '', 'x']);
+  assert.deepEqual(grid[5].slice(2, 5), ['正確', '測試"引號"有限公司', 1000000]);
+  assert.equal(fake.bg['3,3'], '#fde2e1');
+  assert.equal(fake.bg['4,4'], '#fff4c2');
+  assert.equal(fake.bg['2,3'], null);
 });
 
-test('面板：沒有標題列時從第 1 列開始', () => {
+test('面板：第一列就是資料時，在最上面補一列標題', () => {
   const grid = [['22099131'], ['22099104']];
   const { ctx } = loadAddon(grid);
+  assert.equal(ctx.getSheetInfo().hasHeader, false);
   const s = ctx.fillCompanyData({ column: 1, fields: ['名稱'], check: false });
   assert.equal(s.found, 2);
-  assert.deepEqual(grid.map((r) => r[1]), ['台灣積體電路製造股份有限公司', '台灣積體電路製造股份有限公司台北分公司']);
+  assert.equal(s.addedHeaderRow, true);
+  assert.deepEqual(grid, [
+    ['統編', '名稱'],
+    ['22099131', '台灣積體電路製造股份有限公司'],
+    ['22099104', '台灣積體電路製造股份有限公司台北分公司'],
+  ]);
 });
 
 test('面板：沒勾任何欄位要報錯', () => {
@@ -145,7 +163,7 @@ test('統編查詢：單格、欄位、查無、格式錯誤', () => {
   assert.equal(ctx.統編查詢('22099131'), '台灣積體電路製造股份有限公司');
   assert.equal(ctx.統編查詢(22099131, '資本額'), 259323700670);
   assert.equal(ctx.統編查詢('22099131', '開發票'), '是');
-  assert.equal(ctx.統編查詢(4595257, '地址'), '台中市某路２號，三樓');
+  assert.equal(ctx.統編查詢(4595257, '地址'), '台中市某路2號,三樓');
   assert.equal(ctx.統編查詢('38965019'), '查無（可能不是公司或已不營業）');
   assert.equal(ctx.統編查詢('22099132'), '統編格式錯誤');
   assert.equal(ctx.統編查詢(''), '');
@@ -216,4 +234,21 @@ test('面板：整欄用名稱找統編，請確認上黃色，查無上紅色',
   const r = ctx.searchCompanyName('華碩');
   assert.equal(r.candidates[0].id, '23638777');
   assert.equal(r.candidates.length, 2);
+});
+
+test('面板：名稱欄第一列就是公司名稱，不會被當成標題', () => {
+  const grid = [['華碩電腦'], ['鴻海']];
+  const { ctx } = loadAddon(grid);
+  const s = ctx.fillCompanyIds({ column: 1 });
+  assert.equal(s.addedHeaderRow, true);
+  assert.deepEqual(grid[0], ['公司名稱', '統編', '正式名稱', '比對結果', '其他可能']);
+  assert.deepEqual(grid[1].slice(0, 3), ['華碩電腦', '23638777', '華碩電腦股份有限公司']);
+  assert.equal(grid[2][1], '04541302');
+});
+
+test('顯示用整理：全形英數轉半形、去掉全形空白', async () => {
+  const { tidyText } = await import('../scripts/build-shards.mjs');
+  assert.equal(tidyText('臺北市中正區信義路１段２１－３號'), '臺北市中正區信義路1段21-3號');
+  assert.equal(tidyText('新竹市東　區'), '新竹市東區');
+  assert.equal(tidyText('ＡＢＣ（台灣）有限公司'), 'ABC(台灣)有限公司');
 });

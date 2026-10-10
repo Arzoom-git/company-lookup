@@ -56,9 +56,9 @@
 
     <h2>整欄一起找</h2>
     <select id="nameCol" aria-label="公司名稱在哪一欄"><option>讀取中…</option></select>
-    <label class="check"><input type="checkbox" id="nameHeader" checked> 第一列是標題</label>
+    <label class="check"><input type="checkbox" id="nameHeader"> 第一列是標題</label>
     <button class="main" id="nameGo" disabled>開始找統編</button>
-    <div class="hint">會在最右邊新增：統編、正式名稱、比對結果、其他可能。<br>黃色＝請確認，紅色＝查無。</div>
+    <div class="hint">會在名稱那一欄的右邊插入：統編、正式名稱、比對結果、其他可能。<br>黃色＝請確認，紅色＝查無。</div>
     <div class="result" id="nameResult"></div>
   </div>
 
@@ -72,7 +72,7 @@
     <label class="check"><input type="checkbox" id="check" checked> 順便檢查統編有沒有打錯</label>
 
     <button class="main" id="go" disabled>開始填入</button>
-    <div class="hint">結果會放在最右邊的新欄位，不會覆蓋原本的資料。</div>
+    <div class="hint">結果會插在統編那一欄的右邊，不會覆蓋原本的資料。</div>
     <div class="result" id="result"></div>
   </div>
 
@@ -104,6 +104,7 @@
     } else {
       $('col').innerHTML = columnOptions(info, info.guess);
       $('nameCol').innerHTML = columnOptions(info, info.nameGuess);
+      $('nameHeader').checked = !!info.hasHeader;
       $('colHint').textContent = info.guess ? '已自動選出看起來像統編的那一欄。' : '找不到像統編的欄位，請手動選。';
       $('go').disabled = $('nameGo').disabled = false;
     }
@@ -141,7 +142,7 @@
     var btn = busy($('nameGo'), '找統編中…');
     run(function (s) {
       btn.done('開始找統編');
-      var lines = ['<span class="ok">完成</span>，填在 ' + s.firstColumn + '–' + s.lastColumn + ' 欄', '確定 ' + s.confident + ' 家'];
+      var lines = [done(s), '確定 ' + s.confident + ' 家'];
       if (s.check) lines.push('<span class="chip" style="background:var(--warn-bg)"></span>請確認 ' + s.check + ' 家（看「其他可能」那欄）');
       if (s.notFound) lines.push('<span class="chip" style="background:var(--bad-bg)"></span>查無 ' + s.notFound + ' 家');
       show('nameResult', lines.join('<br>'));
@@ -155,7 +156,7 @@
     var btn = busy($('go'), '查詢中…');
     run(function (s) {
       btn.done('開始填入');
-      var lines = ['<span class="ok">完成</span>，填在 ' + s.firstColumn + (s.lastColumn !== s.firstColumn ? '–' + s.lastColumn : '') + ' 欄', '查到 ' + s.found + ' 家'];
+      var lines = [done(s), '查到 ' + s.found + ' 家'];
       if (s.notFound) lines.push('<span class="chip" style="background:var(--warn-bg)"></span>查無 ' + s.notFound + ' 家（可能不是公司或已不營業）');
       if (s.invalid) lines.push('<span class="chip" style="background:var(--bad-bg)"></span>統編格式錯誤 ' + s.invalid + ' 筆');
       show('result', lines.join('<br>'));
@@ -163,6 +164,10 @@
       .fillCompanyData({ column: Number($('col').value), fields: fields, check: $('check').checked });
   });
 
+  function done(s) {
+    var where = s.firstColumn + (s.lastColumn !== s.firstColumn ? '–' + s.lastColumn : '') + ' 欄';
+    return '<span class="ok">完成</span>，插在 ' + where + (s.addedHeaderRow ? '<br>（原本沒有標題列，已在最上面補一列標題）' : '');
+  }
   function busy(btn, text) {
     btn.disabled = true; btn.textContent = text;
     return { done: function (t) { btn.disabled = false; btn.textContent = t; } };
